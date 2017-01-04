@@ -1,0 +1,10 @@
+[package]
+name = "rgs"
+version = "0.0.1"
+authors = ["Artem Vorotnikov <artem@vorotnikov.me>"]
+description = "Tool for querying game servers"
+repository = "https://github.com/game-recon/rgs"
+keywords = ["game", "games"]
+license = "MIT"
+
+[dependencies]
