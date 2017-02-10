@@ -1,10 +1,26 @@
 [package]
 name = "rgs"
-version = "0.0.1"
-authors = ["Artem Vorotnikov <artem@vorotnikov.me>"]
+version = "0.1.0"
+authors = [
+    "Artem Vorotnikov <artem@vorotnikov.me>",
+]
 description = "Tool for querying game servers"
-repository = "https://github.com/game-recon/rgs"
-keywords = ["game", "games"]
+repository = "https://github.com/vorot93/rgs"
+keywords = [
+    "game",
+    "games",
+]
 license = "MIT"
 
 [dependencies]
+rgs_models = "*"
+rand = "*"
+serde_json = "*"
+byteorder = "*"
+resolve = "*"
+
+[dependencies.handlebars]
+version = "*"
+features = [
+    "serde_type",
+]
