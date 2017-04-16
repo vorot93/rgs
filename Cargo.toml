@@ -14,6 +14,7 @@ license = "MIT"
 
 [dependencies]
 rgs_models = "*"
+enum_primitive = "*"
 rand = "*"
 serde_json = "*"
 byteorder = "*"

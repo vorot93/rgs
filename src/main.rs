@@ -3,6 +3,8 @@ extern crate resolve;
 #[macro_use]
 extern crate serde_json;
 extern crate rgs_models as models;
+#[macro_use]
+extern crate enum_primitive;
 
 use rand::distributions::Sample;
 use std::fmt::Debug;

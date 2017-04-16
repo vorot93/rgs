@@ -7,11 +7,82 @@ use protocols::helpers;
 use protocols::models as pmodels;
 use std::str::FromStr;
 use util;
+use enum_primitive::FromPrimitive;
 
-fn parse_data(buf: &Vec<u8>) -> Result<Vec<std::net::IpAddr>, Error> {
-    let data = vec![];
-    Ok(data)
+use std::sync::{Arc, Mutex};
+
+enum_from_primitive! {
+    #[derive(Clone, Debug, PartialEq)]
+enum IPVer {
+    V4,
+    V6,
+    AUTODETECT,
 }
+}
+
+enum_from_primitive! {
+    #[derive(Clone, Debug, PartialEq)]
+enum PktType {
+    PACKET_UDP_CLIENT_FIND_SERVER,
+    PACKET_UDP_SERVER_RESPONSE,
+    PACKET_UDP_CLIENT_DETAIL_INFO,
+    PACKET_UDP_SERVER_DETAIL_INFO,
+    PACKET_UDP_SERVER_REGISTER,
+    PACKET_UDP_MASTER_ACK_REGISTER,
+    PACKET_UDP_CLIENT_GET_LIST,
+    PACKET_UDP_MASTER_RESPONSE_LIST,
+    PACKET_UDP_SERVER_UNREGISTER,
+    PACKET_UDP_CLIENT_GET_NEWGRFS,
+    PACKET_UDP_SERVER_NEWGRFS,
+    PACKET_UDP_MASTER_SESSION_KEY,
+    PACKET_UDP_END,
+}
+}
+
+pub fn make_request(c: &pmodels::Config) -> Result<Vec<u8>, Error> {
+    Ok(vec![2, 2])
+}
+
+fn parse_v4(len: u16, buf: std::vec::IntoIter<u8>) -> Result<Vec<std::net::IpAddr>, Error> {
+    unimplemented!()
+}
+
+fn parse_v6(len: u16, buf: std::vec::IntoIter<u8>) -> Result<Vec<std::net::IpAddr>, Error> {
+    unimplemented!()
+}
+
+fn parse_data(b: &Vec<u8>) -> Result<Vec<std::net::IpAddr>, Error> {
+    let mut buf = b.clone().into_iter();
+
+    {
+        let t = PktType::from_u8(try_next!(buf))
+            .ok_or(Error::InvalidPacketError(format!("Unknown packet type")))?;
+
+        if t != PktType::PACKET_UDP_MASTER_RESPONSE_LIST {
+            return Err(Error::InvalidPacketError(format!("Invalid packet type: {:?}", t)));
+        }
+    }
+
+    let len = util::to_u16(&[try_next!(buf), try_next!(buf)]);
+
+    Ok(match IPVer::from_u8(try_next!(buf))
+                 .ok_or(Error::InvalidPacketError(format!("Unknown IP type")))? {
+           IPVer::V4 => parse_v4(len, buf),
+           IPVer::V6 => parse_v6(len, buf),
+           _ => Err(Error::InvalidPacketError(format!("Invalid IP type"))),
+       }?)
+}
+
+pub fn parse_response
+    (p: &pmodels::Packet,
+     c: &pmodels::Config,
+     us: Arc<Mutex<pmodels::Protocol>>,
+     child: Option<Arc<Mutex<pmodels::Protocol>>>)
+     -> Result<(Vec<models::Server>, Vec<(Arc<Mutex<pmodels::Protocol>>, std::net::SocketAddr)>),
+               Error> {
+    unimplemented!()
+}
+
 
 #[cfg(test)]
 mod tests {
