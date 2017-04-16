@@ -8,12 +8,6 @@ use errors::Error;
 use std::sync::{Arc, Mutex};
 use serde_json::{Map, Value};
 
-#[derive(Clone, Copy, Debug)]
-pub enum ProtocolRelationship {
-    Current,
-    Child,
-}
-
 pub type Config = serde_json::Map<String, serde_json::Value>;
 
 #[derive(Clone, Debug)]
@@ -22,34 +16,54 @@ pub struct Packet {
     pub data: Vec<u8>,
 }
 
-pub trait Protocol {
-    fn make_request(&self, &Config) -> Result<Vec<u8>, Error>;
-    fn parse_response<'a>
-        (&self,
-         &Packet,
-         &Config)
-         -> Result<(Vec<models::Server>, Vec<(ProtocolRelationship, std::net::SocketAddr)>), Error>;
+pub type RequestFunc = fn(&Config) -> Result<Vec<u8>, Error>;
+pub type ResponseFunc = fn(&Packet,
+                           &Config,
+                           Arc<Mutex<Protocol>>,
+                           Option<Arc<Mutex<Protocol>>>)
+                           -> Result<(Vec<models::Server>,
+                                       Vec<(Arc<Mutex<Protocol>>, std::net::SocketAddr)>),
+                                      Error>;
+
+pub fn RequestDummy(_: &Config) -> Result<Vec<u8>, Error> {
+    unimplemented!()
 }
 
-trait_alias!(SProtocol = Protocol + Send + Sync + Debug);
-
-#[derive(Debug)]
-pub struct ProtocolConfigEntry {
-    pub data: Box<SProtocol>,
-    pub config: Map<String, Value>,
-    pub child: Option<Arc<Mutex<ProtocolConfigEntry>>>,
+pub fn ResponseDummy
+    (_: &Packet,
+     _: &Config,
+     _: Arc<Mutex<Protocol>>,
+     _: Option<Arc<Mutex<Protocol>>>)
+     -> Result<(Vec<models::Server>, Vec<(Arc<Mutex<Protocol>>, std::net::SocketAddr)>), Error> {
+    unimplemented!()
 }
 
-impl ProtocolConfigEntry {
-    pub fn make<T: SProtocol + Default + 'static>() -> Arc<Mutex<ProtocolConfigEntry>> {
-        Arc::new(Mutex::new(ProtocolConfigEntry {
-            data: Box::new(T::default()),
-            config: Map::default(),
-            child: Option::default(),
-        }))
+pub struct Protocol {
+    pub config: Config,
+    pub child: Option<Arc<Mutex<Protocol>>>,
+    pub make_request_fn: RequestFunc,
+    pub parse_response_fn: ResponseFunc,
+}
+
+impl Default for Protocol {
+    fn default() -> Protocol {
+        Protocol {
+            config: Config::default(),
+            child: None,
+            make_request_fn: RequestDummy,
+            parse_response_fn: ResponseDummy,
+        }
     }
 }
 
-pub type TProtocolEntry = Arc<Mutex<ProtocolConfigEntry>>;
+impl Debug for Protocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        self.config.fmt(f)?;
+        self.child.fmt(f)?;
 
-pub type ProtocolConfig = std::collections::HashMap<String, TProtocolEntry>;
+        Ok(())
+    }
+}
+
+pub type TProtocol = Arc<Mutex<Protocol>>;
+pub type ProtocolConfig = std::collections::HashMap<String, TProtocol>;
