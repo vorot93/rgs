@@ -34,9 +34,10 @@ pub fn to_u32(slice: &[u8; 4]) -> u32 {
     Cursor::new(slice).read_u32::<BigEndian>().unwrap()
 }
 
-pub fn multi_next<'a, V, I: Iterator<Item = &'a V>>(iter: &mut I,
-                                                    n: i64)
-                                                    -> Result<Box<[&'a V]>, Error> {
+pub fn multi_next<'a, V, I: Iterator<Item = &'a V>>(
+    iter: &mut I,
+    n: i64,
+) -> Result<Box<[&'a V]>, Error> {
     let mut v = Vec::new();
     for _ in 0..n {
         v.push(try_next!(iter));

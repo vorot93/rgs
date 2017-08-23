@@ -21,8 +21,10 @@ fn parse_data(buf: &Vec<u8>, addr: std::net::SocketAddr) -> Result<models::Serve
     try_next!(iter);
 
     let protocol_ver = *try_next!(iter);
-    e.rules
-        .insert("protocol-version".into(), json!(protocol_ver));
+    e.rules.insert(
+        "protocol-version".into(),
+        protocol_ver.into(),
+    );
     if protocol_ver >= 4 {
         let active_newgrf_num = try_next!(iter).clone();
         let active_newgrfs = {
@@ -40,10 +42,14 @@ fn parse_data(buf: &Vec<u8>, addr: std::net::SocketAddr) -> Result<models::Serve
             }
             v
         };
-        e.rules
-            .insert("active-newgrfs-num".into(), json!(active_newgrf_num));
-        e.rules
-            .insert("active-newgrfs".into(), json!(active_newgrfs));
+        e.rules.insert(
+            "active-newgrfs-num".into(),
+            json!(active_newgrf_num),
+        );
+        e.rules.insert(
+            "active-newgrfs".into(),
+            json!(active_newgrfs),
+        );
     }
 
     if protocol_ver >= 3 {
@@ -52,25 +58,33 @@ fn parse_data(buf: &Vec<u8>, addr: std::net::SocketAddr) -> Result<models::Serve
     }
 
     if protocol_ver >= 2 {
-        e.rules
-            .insert("max-companies".into(), json!(try_next!(iter)));
-        e.rules
-            .insert("current-companies".into(), json!(try_next!(iter)));
-        e.rules
-            .insert("max-spectators".into(), json!(try_next!(iter)));
+        e.rules.insert(
+            "max-companies".into(),
+            json!(try_next!(iter)),
+        );
+        e.rules.insert(
+            "current-companies".into(),
+            json!(try_next!(iter)),
+        );
+        e.rules.insert(
+            "max-spectators".into(),
+            json!(try_next!(iter)),
+        );
     }
     e.name = Some(try!(util::read_string(&mut iter, 0)));
-    e.rules
-        .insert("server-version".into(),
-                json!(try!(util::read_string(&mut iter, 0))));
+    e.rules.insert(
+        "server-version".into(),
+        json!(try!(util::read_string(&mut iter, 0))),
+    );
 
-    e.rules
-        .insert("language-id".into(), json!(try_next!(iter)));
+    e.rules.insert("language-id".into(), json!(try_next!(iter)));
     e.need_pass = Some(*try_next!(iter) > 0);
     e.max_clients = Some(try_next!(iter).clone().into());
     e.num_clients = Some(try_next!(iter).clone().into());
-    e.rules
-        .insert("current-spectators".into(), json!(try_next!(iter)));
+    e.rules.insert(
+        "current-spectators".into(),
+        json!(try_next!(iter)),
+    );
     if protocol_ver < 3 {
         for _ in 0..2 {
             try_next!(iter);
@@ -88,8 +102,7 @@ fn parse_data(buf: &Vec<u8>, addr: std::net::SocketAddr) -> Result<models::Serve
         try_next!(iter);
     }
     e.rules.insert("map-set".into(), json!(try_next!(iter)));
-    e.rules
-        .insert("dedicated".into(), json!(try_next!(iter)));
+    e.rules.insert("dedicated".into(), json!(try_next!(iter)));
 
     Ok(e)
 }
@@ -111,13 +124,12 @@ pub fn make_request(c: &pmodels::Config) -> Result<Vec<u8>, Error> {
     helpers::make_request_packet(t, c)
 }
 
-pub fn parse_response
-    (p: &pmodels::Packet,
-     _: &pmodels::Config,
-     _: Arc<Mutex<pmodels::Protocol>>,
-     _: Option<Arc<Mutex<pmodels::Protocol>>>)
-     -> Result<(Vec<models::Server>, Vec<(Arc<Mutex<pmodels::Protocol>>, std::net::SocketAddr)>),
-               Error> {
+pub fn parse_response(
+    p: &pmodels::Packet,
+    _: &pmodels::Config,
+    _: Arc<Mutex<pmodels::Protocol>>,
+    _: Option<Arc<Mutex<pmodels::Protocol>>>,
+) -> Result<(Vec<models::Server>, Vec<(Arc<Mutex<pmodels::Protocol>>, std::net::SocketAddr)>), Error> {
     let mut v = try!(parse_data(&p.data, p.addr.clone()));
     v.addr = p.addr.into();
     Ok((vec![v], vec![]))
@@ -125,6 +137,8 @@ pub fn parse_response
 
 #[cfg(test)]
 mod tests {
+    extern crate serde_json;
+
     use super::*;
     use std::str::FromStr;
     use self::pmodels::Protocol;
@@ -140,9 +154,9 @@ mod tests {
         srv.need_pass = Some(false);
         srv.rules.insert("protocol-version".into(), json!(4));
         srv.rules.insert("active-newgrfs-num".into(), json!(3));
-        srv.rules
-            .insert("active-newgrfs".into(),
-                    json!([
+        srv.rules.insert(
+            "active-newgrfs".into(),
+            json!([
             {
                 "id": "4d470305",
                 "md5": "2e96b9ab2bea686bff94961ad433a701",
@@ -155,18 +169,18 @@ mod tests {
                 "id": "444e0700",
                 "md5": "48b3f9e4fd0df2a72b5f44d3c8a2f4a0",
             }
-        ]));
-        srv.rules
-            .insert("time-current".into(), json!(1676413440));
-        srv.rules.insert("time-start".into(), json!(1676413440));
-        srv.rules.insert("max-companies".into(), json!(15));
-        srv.rules.insert("current-companies".into(), json!(0));
-        srv.rules.insert("server-version".into(), json!("1.5.3"));
-        srv.rules.insert("language-id".into(), json!(22));
-        srv.rules.insert("current-spectators".into(), json!(0));
-        srv.rules.insert("max-spectators".into(), json!(10));
-        srv.rules.insert("map-set".into(), json!(1));
-        srv.rules.insert("dedicated".into(), json!(1));
+        ]),
+        );
+        srv.rules.insert("time-current".into(), 1676413440.into());
+        srv.rules.insert("time-start".into(), 1676413440.into());
+        srv.rules.insert("max-companies".into(), 15.into());
+        srv.rules.insert("current-companies".into(), 0.into());
+        srv.rules.insert("server-version".into(), "1.5.3".into());
+        srv.rules.insert("language-id".into(), 22.into());
+        srv.rules.insert("current-spectators".into(), 0.into());
+        srv.rules.insert("max-spectators".into(), 10.into());
+        srv.rules.insert("map-set".into(), 1.into());
+        srv.rules.insert("dedicated".into(), 1.into());
 
         (addr, data, srv)
     }
@@ -197,14 +211,15 @@ mod tests {
 
         let expectation = vec![server];
 
-        let (result, _) = parse_response(&pmodels::Packet {
-                                              addr: addr,
-                                              data: data,
-                                          },
-                                         &pmodels::Config::default(),
-                                         Arc::new(Mutex::new(pmodels::Protocol::default())),
-                                         None)
-                .unwrap();
+        let (result, _) = parse_response(
+            &pmodels::Packet {
+                addr: addr,
+                data: data,
+            },
+            &pmodels::Config::default(),
+            Arc::new(Mutex::new(pmodels::Protocol::default())),
+            None,
+        ).unwrap();
 
         assert_eq!(result, expectation);
     }

@@ -21,20 +21,22 @@ pub type ResponseFunc = fn(&Packet,
                            &Config,
                            Arc<Mutex<Protocol>>,
                            Option<Arc<Mutex<Protocol>>>)
-                           -> Result<(Vec<models::Server>,
-                                       Vec<(Arc<Mutex<Protocol>>, std::net::SocketAddr)>),
-                                      Error>;
+                           -> Result<
+    (Vec<models::Server>,
+     Vec<(Arc<Mutex<Protocol>>, std::net::SocketAddr)>),
+    Error,
+>;
 
 pub fn RequestDummy(_: &Config) -> Result<Vec<u8>, Error> {
     unimplemented!()
 }
 
-pub fn ResponseDummy
-    (_: &Packet,
-     _: &Config,
-     _: Arc<Mutex<Protocol>>,
-     _: Option<Arc<Mutex<Protocol>>>)
-     -> Result<(Vec<models::Server>, Vec<(Arc<Mutex<Protocol>>, std::net::SocketAddr)>), Error> {
+pub fn ResponseDummy(
+    _: &Packet,
+    _: &Config,
+    _: Arc<Mutex<Protocol>>,
+    _: Option<Arc<Mutex<Protocol>>>,
+) -> Result<(Vec<models::Server>, Vec<(Arc<Mutex<Protocol>>, std::net::SocketAddr)>), Error> {
     unimplemented!()
 }
 

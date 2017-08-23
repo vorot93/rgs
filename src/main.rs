@@ -67,38 +67,40 @@ impl ServerEntry {
     }
 }
 
-fn query_udp_full(req: Vec<UserRequest>,
-                  log_fn: Arc<Fn(String) + Send + Sync>)
-                  -> Result<std::collections::HashSet<ServerEntry>, Error> {
+fn query_udp_full(
+    req: Vec<UserRequest>,
+    log_fn: Arc<Fn(String) + Send + Sync>,
+) -> Result<std::collections::HashSet<ServerEntry>, Error> {
     let (srv_tx, srv_rx) = channel();
     log_fn(format!("Created channel"));
 
-    let mut dnsconf = resolve::config::default_config()
-        .map_err(|err| Error::NetworkError(format!("DNS error: {}", err)))?;
+    let mut dnsconf = resolve::config::default_config().map_err(|err| {
+        Error::NetworkError(format!("DNS error: {}", err))
+    })?;
     dnsconf.timeout = std::time::Duration::new(5, 0);
     let dns = resolve::resolver::DnsResolver::new(dnsconf).unwrap();
 
-    let queries = req.iter()
-        .fold(Vec::new(), |mut vec, ref srv| {
-            match dns.resolve_host(&srv.host) {
-                Ok(mut addr) => {
-                    vec.push(QueryEntry {
-                                 protocol: srv.protocol.clone(),
-                                 host: std::net::SocketAddr::new(addr.next().unwrap(),
-                                                                 srv.port.clone()),
-                             });
-                }
-                Err(_) => {}
-            };
-            vec
-        });
+    let queries = req.iter().fold(Vec::new(), |mut vec, ref srv| {
+        match dns.resolve_host(&srv.host) {
+            Ok(mut addr) => {
+                vec.push(QueryEntry {
+                    protocol: srv.protocol.clone(),
+                    host: std::net::SocketAddr::new(addr.next().unwrap(), srv.port.clone()),
+                });
+            }
+            Err(_) => {}
+        };
+        vec
+    });
 
     for q in queries {
         srv_tx.send(q).unwrap();
     }
 
-    let srv_history = Arc::new(Mutex::new(std::collections::HashMap::<std::net::SocketAddr,
-                                                                      pmodels::TProtocol>::new()));
+    let srv_history = Arc::new(Mutex::new(std::collections::HashMap::<
+        std::net::SocketAddr,
+        pmodels::TProtocol,
+    >::new()));
 
     let socket = std::net::UdpSocket::bind((std::net::Ipv4Addr::new(0, 0, 0, 0), 0)).unwrap();
     socket
@@ -111,8 +113,8 @@ fn query_udp_full(req: Vec<UserRequest>,
         let socket = socket.try_clone().unwrap();
         let srv_history = srv_history.clone();
         std::thread::spawn({
-                               let log_fn = log_fn.clone();
-                               move || -> Result<(), Error> {
+            let log_fn = log_fn.clone();
+            move || -> Result<(), Error> {
                 loop {
                     let srv = srv_rx.recv()?;
                     let prot = (*srv.protocol).lock().unwrap();
@@ -120,10 +122,10 @@ fn query_udp_full(req: Vec<UserRequest>,
                         Ok(req) => {
                             log_fn(format!("Sending request: {:?}", &req));
                             socket.send_to(req.as_slice(), &srv.host)?;
-                            (*srv_history)
-                                .lock()
-                                .unwrap()
-                                .insert(srv.host.clone(), srv.protocol.clone());
+                            (*srv_history).lock().unwrap().insert(
+                                srv.host.clone(),
+                                srv.protocol.clone(),
+                            );
                         }
                         Err(err) => {
                             log_fn(format!("Failed to make request: {:?}", err));
@@ -131,7 +133,7 @@ fn query_udp_full(req: Vec<UserRequest>,
                     }
                 }
             }
-                           })
+        })
     };
 
     // Read incoming bytes
@@ -139,8 +141,8 @@ fn query_udp_full(req: Vec<UserRequest>,
     let receive_handle = {
         let socket = socket.try_clone().unwrap();
         std::thread::spawn({
-                               let log_fn = log_fn.clone();
-                               move || -> Result<(), Error> {
+            let log_fn = log_fn.clone();
+            move || -> Result<(), Error> {
                 loop {
                     let mut buf = vec![0; 1000000];
                     let (recv_size, addr) = socket.recv_from(buf.as_mut_slice())?;
@@ -152,7 +154,7 @@ fn query_udp_full(req: Vec<UserRequest>,
                     data_recv_tx.send((addr, buf))?;
                 }
             }
-                           })
+        })
     };
 
     // Parse incoming bytes and send further requests
@@ -165,14 +167,15 @@ fn query_udp_full(req: Vec<UserRequest>,
                 match (*srv_history).lock().unwrap().get(&recv_data.0) {
                     Some(p) => {
                         let prot = p.lock().unwrap();
-                        let data = (prot.parse_response_fn)(&protocols::models::Packet {
-                                                                 addr: recv_data.0,
-                                                                 data: recv_data.1,
-                                                             },
-                                                            &protocols::models::Config::default(),
-                                                            p.clone(),
-                                                            prot.child.clone())
-                                .unwrap();
+                        let data = (prot.parse_response_fn)(
+                            &protocols::models::Packet {
+                                addr: recv_data.0,
+                                data: recv_data.1,
+                            },
+                            &protocols::models::Config::default(),
+                            p.clone(),
+                            prot.child.clone(),
+                        ).unwrap();
                         for srv in data.0 {
                             data_collect_tx
                                 .send(ServerEntry::new(p.clone(), srv))
@@ -180,9 +183,9 @@ fn query_udp_full(req: Vec<UserRequest>,
                         }
                         for srv in data.1 {
                             try!(srv_tx.send(QueryEntry {
-                                                 protocol: srv.0,
-                                                 host: srv.1,
-                                             }));
+                                protocol: srv.0,
+                                host: srv.1,
+                            }));
                         }
                     }
                     _ => {}
@@ -214,31 +217,31 @@ fn main() {
     // let server = ("master.openttd.org", 3978);
     // let p = protocols::openttdm::P::default();
     let log_fn = Arc::new(|msg| {
-                              println!("{}", msg);
-                          });
+        println!("{}", msg);
+    });
     let mut pconfig = pmodels::ProtocolConfig::new();
 
     {
         let server_p = Arc::new(Mutex::new(pmodels::Protocol {
-                                               child: None,
-                                               config: {
-                                                   let mut m = pmodels::Config::default();
-                                                   m.insert("prelude-finisher".into(),
-                                                            Value::String("\x00\x00".into()));
-                                                   m
-                                               },
-                                               make_request_fn: protocols::openttds::make_request,
-                                               parse_response_fn:
-                                                   protocols::openttds::parse_response,
-                                           }));
+            child: None,
+            config: {
+                let mut m = pmodels::Config::default();
+                m.insert("prelude-finisher".into(), Value::String("\x00\x00".into()));
+                m
+            },
+            make_request_fn: protocols::openttds::make_request,
+            parse_response_fn: protocols::openttds::parse_response,
+        }));
         pconfig.insert("openttds".into(), server_p);
     }
 
-    let requests = vec![UserRequest {
-                            protocol: pconfig.get("openttds".into()).unwrap().clone(),
-                            host: "ttd.duck.me.uk".into(),
-                            port: 3979,
-                        }];
+    let requests = vec![
+        UserRequest {
+            protocol: pconfig.get("openttds".into()).unwrap().clone(),
+            host: "ttd.duck.me.uk".into(),
+            port: 3979,
+        },
+    ];
 
     let data = query_udp_full(requests, log_fn.clone());
     log_fn(format!("{:?}", data));
