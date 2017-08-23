@@ -14,14 +14,11 @@ license = "MIT"
 
 [dependencies]
 rgs_models = "*"
-enum_primitive = "*"
-rand = "*"
-serde_json = "*"
 byteorder = "*"
+enum_primitive = "*"
+handlebars = "*"
+rand = "*"
 resolve = "*"
-
-[dependencies.handlebars]
-version = "*"
-features = [
-    "serde_type",
-]
+serde = "*"
+serde_derive = "*"
+serde_json = "*"
