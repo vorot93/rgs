@@ -5,9 +5,17 @@ pub mod openttdm;
 pub mod openttds;
 pub mod q3s;
 
-pub fn get_request_func(s: &str) -> Option<models::RequestFunc> {
+use errors;
+
+use std::sync::Arc;
+
+pub fn make_protocol(
+    s: &str,
+    config: &models::Config,
+    follow_up: Option<Arc<models::Protocol>>,
+) -> errors::Result<Option<Arc<models::Protocol>>> {
     match s {
-        "openttds::make_request" => Some(openttds::make_request),
-        _ => None,
+        "openttds" => Ok(Some(Arc::new(openttds::Protocol::new(config)?))),
+        _ => Ok(None),
     }
 }

@@ -12,11 +12,21 @@ keywords = [
 ]
 license = "MIT"
 
+[lib]
+name = "librgs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rgs"
+path = "src/main.rs"
+
 [dependencies]
 rgs_models = "*"
+error-chain = "*"
 byteorder = "*"
 enum_primitive = "*"
 handlebars = "*"
+log = "*"
 rand = "*"
 resolve = "*"
 serde = "*"
