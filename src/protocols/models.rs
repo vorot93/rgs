@@ -4,6 +4,8 @@ extern crate rgs_models as models;
 
 use errors;
 
+use std::str::FromStr;
+
 use std::sync::Arc;
 
 pub type Config = serde_json::Map<String, serde_json::Value>;
@@ -14,9 +16,34 @@ pub struct Packet {
     pub data: Vec<u8>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StringAddr {
+    pub host: String,
+    pub port: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Host {
+    A(std::net::SocketAddr),
+    S(StringAddr),
+}
+
+#[derive(Clone, Debug)]
+pub struct QueryEntry {
+    pub protocol: TProtocol,
+    pub addr: Host,
+}
+
+impl PartialEq for QueryEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.addr == other.addr && Arc::ptr_eq(&self.protocol, &other.protocol)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ParseResult {
     pub servers: Vec<models::Server>,
-    pub follow_up: Vec<(std::net::SocketAddr, Arc<Protocol>)>,
+    pub follow_up: Vec<QueryEntry>,
 }
 
 pub trait Protocol: std::fmt::Debug + Send + Sync {

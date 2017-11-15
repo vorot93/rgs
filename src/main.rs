@@ -31,10 +31,14 @@ fn main() {
     }
 
     let requests = vec![
-        librgs::UserRequest {
+        pmodels::QueryEntry {
             protocol: pconfig.get("openttds".into()).unwrap().clone(),
-            host: "ttd.duck.me.uk".into(),
-            port: 3979,
+            addr: pmodels::Host::S(
+                pmodels::StringAddr {
+                    host: "ttd.duck.me.uk".into(),
+                    port: 3979,
+                }.into(),
+            ),
         },
     ];
 

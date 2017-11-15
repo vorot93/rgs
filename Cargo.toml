@@ -1,6 +1,6 @@
 [package]
 name = "rgs"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
     "Artem Vorotnikov <artem@vorotnikov.me>",
 ]
@@ -25,6 +25,7 @@ rgs_models = "*"
 error-chain = "*"
 byteorder = "*"
 enum_primitive = "*"
+futures = "*"
 handlebars = "*"
 log = "*"
 rand = "*"
@@ -32,3 +33,4 @@ resolve = "*"
 serde = "*"
 serde_derive = "*"
 serde_json = "*"
+tokio-core = "*"

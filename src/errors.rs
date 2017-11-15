@@ -7,6 +7,7 @@ error_chain!{
         TemplateError(handlebars::TemplateRenderError);
         ChannelRecvError(std::sync::mpsc::RecvError);
         IOError(std::io::Error);
+        AddrParseError(std::net::AddrParseError);
     }
     errors {
         NullError(t: String) {

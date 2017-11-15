@@ -38,11 +38,17 @@ enum PktType {
 }
 }
 
-fn parse_v4(len: u16, buf: Box<std::iter::Iterator<Item = u8>>) -> errors::Result<Vec<std::net::IpAddr>> {
+fn parse_v4(
+    len: u16,
+    buf: Box<std::iter::Iterator<Item = u8>>,
+) -> errors::Result<Vec<std::net::IpAddr>> {
     unimplemented!()
 }
 
-fn parse_v6(len: u16, buf: Box<std::iter::Iterator<Item = u8>>) -> errors::Result<Vec<std::net::IpAddr>> {
+fn parse_v6(
+    len: u16,
+    buf: Box<std::iter::Iterator<Item = u8>>,
+) -> errors::Result<Vec<std::net::IpAddr>> {
     unimplemented!()
 }
 
@@ -56,9 +62,9 @@ impl Protocol {
         let mut buf = b.into_iter();
 
         {
-            let t = PktType::from_u8(next_item(&mut buf)?).ok_or_else(
-                || Error::from(ErrorKind::InvalidPacketError("Unknown packet type".into()))
-            )?;
+            let t = PktType::from_u8(next_item(&mut buf)?).ok_or_else(|| {
+                Error::from(ErrorKind::InvalidPacketError("Unknown packet type".into()))
+            })?;
 
             if t != PktType::PacketUdpMasterResponseList {
                 return Err(
@@ -71,13 +77,15 @@ impl Protocol {
         let len = util::to_u16(&[next_item(&mut buf)?, next_item(&mut buf)?]);
 
         match IPVer::from_u8(next_item(&mut buf)?).ok_or(
-            Error::from_kind(ErrorKind::InvalidPacketError("Unknown IP type".into())),
+            Error::from_kind(
+                ErrorKind::InvalidPacketError("Unknown IP type".into()),
+            ),
         )? {
             IPVer::V4 => parse_v4(len, Box::from(buf)),
             IPVer::V6 => parse_v6(len, Box::from(buf)),
-            _ => Err(
-                Error::from(ErrorKind::InvalidPacketError("Invalid IP type".into())),
-            ),
+            _ => Err(Error::from(
+                ErrorKind::InvalidPacketError("Invalid IP type".into()),
+            )),
         }
     }
 }
@@ -95,6 +103,8 @@ impl pmodels::Protocol for Protocol {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::str::FromStr;
 
     fn fixtures() -> (Vec<u8>, Vec<std::net::SocketAddr>) {
         let data = vec![

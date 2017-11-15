@@ -13,10 +13,7 @@ pub fn next_item<T, IT: Iterator<Item = T>>(iter: &mut IT) -> errors::Result<T> 
     )
 }
 
-pub fn next_items<T, IT: Iterator<Item = T>>(
-    iter: &mut IT,
-    n: usize,
-) -> errors::Result<Vec<T>> {
+pub fn next_items<T, IT: Iterator<Item = T>>(iter: &mut IT, n: usize) -> errors::Result<Vec<T>> {
     let mut v = Vec::new();
     for _ in 0..n {
         v.push(next_item(iter)?)

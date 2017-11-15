@@ -109,8 +109,14 @@ fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models
     for _ in 0..2 {
         next_item(&mut iter)?;
     }
-    e.rules.insert("map-set".into(), json!(next_item(&mut iter)?));
-    e.rules.insert("dedicated".into(), json!(next_item(&mut iter)?));
+    e.rules.insert(
+        "map-set".into(),
+        json!(next_item(&mut iter)?),
+    );
+    e.rules.insert(
+        "dedicated".into(),
+        json!(next_item(&mut iter)?),
+    );
 
     Ok(e)
 }
@@ -160,8 +166,9 @@ mod tests {
     extern crate serde_json;
 
     use super::*;
+    use super::Protocol as IProtocol;
+    use protocols::models::Protocol;
     use std::str::FromStr;
-    use self::pmodels::Protocol;
     fn fixtures() -> (std::net::SocketAddr, Vec<u8>, models::Server) {
         let addr = std::net::SocketAddr::from_str("127.0.0.1:9000").unwrap();
         let data = vec![0x86, 0x00, 0x01, 0x04, 0x03, 0x4D, 0x47, 0x03, 0x05, 0x2E, 0x96, 0xB9, 0xAB, 0x2B, 0xEA, 0x68, 0x6B, 0xFF, 0x94, 0x96, 0x1A, 0xD4, 0x33, 0xA7, 0x01, 0x32, 0x32, 0x33, 0x22, 0x31, 0x61, 0x80, 0xDA, 0x1B, 0xA6, 0x44, 0x4A, 0x06, 0xCD, 0x17, 0xF8, 0xFA, 0x79, 0xD6, 0x0A, 0x44, 0x4E, 0x07, 0x00, 0x48, 0xB3, 0xF9, 0xE4, 0xFD, 0x0D, 0xF2, 0xA7, 0x2B, 0x5F, 0x44, 0xD3, 0xC8, 0xA2, 0xF4, 0xA0, 0x63, 0xEC, 0x0A, 0x00, 0x63, 0xEC, 0x0A, 0x00, 0x0F, 0x00, 0x0A, 0x4F, 0x6E, 0x6C, 0x79, 0x46, 0x72, 0x69, 0x65, 0x6E, 0x64, 0x73, 0x20, 0x4F, 0x70, 0x65, 0x6E, 0x54, 0x54, 0x44, 0x20, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x20, 0x23, 0x31, 0x00, 0x31, 0x2E, 0x35, 0x2E, 0x33, 0x00, 0x16, 0x00, 0x19, 0x00, 0x00, 0x52, 0x61, 0x6E, 0x64, 0x6F, 0x6D, 0x20, 0x4D, 0x61, 0x70, 0x00, 0x00, 0x04, 0x00, 0x04, 0x01, 0x01];
@@ -206,40 +213,33 @@ mod tests {
     }
 
     #[test]
-    fn test_parse() {
-        let (addr, data, expectation) = fixtures();
-
-        let result = parse_data(&data, addr).unwrap();
-        assert_eq!(result, expectation);
-    }
-
-    #[test]
     fn test_p_make_request() {
         let fixture = json!({
             "prelude-finisher": "\x00\x00",
         });
 
         let expectation = vec![3, 0, 0];
-        let result = make_request(fixture.as_object().unwrap()).unwrap();
+        let result = IProtocol::new(&fixture.as_object().unwrap())
+            .unwrap()
+            .make_request();
 
         assert_eq!(expectation, result);
     }
 
     #[test]
     fn test_p_parse_response() {
+        let p = IProtocol::new(&Default::default()).unwrap();
         let (addr, data, server) = fixtures();
 
-        let expectation = vec![server];
+        let expectation = pmodels::ParseResult {
+            servers: vec![server],
+            follow_up: vec![],
+        };
 
-        let (result, _) = parse_response(
-            &pmodels::Packet {
-                addr: addr,
-                data: data,
-            },
-            &pmodels::Config::default(),
-            Arc::new(Mutex::new(pmodels::Protocol::default())),
-            None,
-        ).unwrap();
+        let (result, _) = p.parse_response(&pmodels::Packet {
+            addr: addr,
+            data: data,
+        }).unwrap();
 
         assert_eq!(result, expectation);
     }
