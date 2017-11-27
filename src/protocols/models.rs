@@ -1,6 +1,6 @@
-extern crate std;
-extern crate serde_json;
 extern crate rgs_models as models;
+extern crate serde_json;
+extern crate std;
 
 use errors;
 
@@ -29,12 +29,12 @@ pub enum Host {
 }
 
 #[derive(Clone, Debug)]
-pub struct QueryEntry {
+pub struct Query {
     pub protocol: TProtocol,
     pub addr: Host,
 }
 
-impl PartialEq for QueryEntry {
+impl PartialEq for Query {
     fn eq(&self, other: &Self) -> bool {
         self.addr == other.addr && Arc::ptr_eq(&self.protocol, &other.protocol)
     }
@@ -43,7 +43,7 @@ impl PartialEq for QueryEntry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParseResult {
     pub servers: Vec<models::Server>,
-    pub follow_up: Vec<QueryEntry>,
+    pub follow_up: Vec<Query>,
 }
 
 pub trait Protocol: std::fmt::Debug + Send + Sync {

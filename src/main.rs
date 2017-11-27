@@ -1,13 +1,18 @@
+#![feature(proc_macro)]
+#![feature(conservative_impl_trait)]
+#![feature(generators)]
+
+extern crate futures_await as futures;
 extern crate librgs;
 extern crate rand;
 extern crate resolve;
-extern crate serde_json;
 extern crate rgs_models as models;
-extern crate enum_primitive;
+extern crate serde_json;
+extern crate tokio_core;
 
+use futures::prelude::*;
 use librgs::QueryService;
 use librgs::util::LoggingService;
-
 use librgs::protocols::models as pmodels;
 use serde_json::Value;
 
@@ -31,7 +36,7 @@ fn main() {
     }
 
     let requests = vec![
-        pmodels::QueryEntry {
+        pmodels::Query {
             protocol: pconfig.get("openttds".into()).unwrap().clone(),
             addr: pmodels::Host::S(
                 pmodels::StringAddr {
@@ -42,11 +47,15 @@ fn main() {
         },
     ];
 
-    let query_manager = librgs::RealQueryManager::new(
-        logger.clone(),
-        Box::new(std::io::stdout()),
-    );
+    let query_manager = librgs::RealQueryService::default();
 
-    let data = query_manager.query_udp(requests);
-    logger.info(&format!("{:?}", data));
+    let mut core = tokio_core::reactor::Core::new().unwrap();
+    core.run(
+        query_manager
+            .query_udp(Box::new(futures::stream::iter_ok(requests)))
+            .inspect(|data| {
+                logger.info(&format!("{:?}", data));
+            })
+            .for_each(|_| Ok(())),
+    ).unwrap();
 }

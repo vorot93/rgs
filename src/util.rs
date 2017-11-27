@@ -1,5 +1,5 @@
-extern crate std;
 extern crate byteorder;
+extern crate std;
 
 use errors;
 
@@ -8,9 +8,9 @@ use self::byteorder::{BigEndian, ReadBytesExt};
 use errors::Error;
 
 pub fn next_item<T, IT: Iterator<Item = T>>(iter: &mut IT) -> errors::Result<T> {
-    iter.next().ok_or(
-        errors::ErrorKind::InvalidPacketError("Early EOF while parsing packet".into()).into(),
-    )
+    iter.next().ok_or(errors::Error::InvalidPacketError {
+        what: "Early EOF while parsing packet".into(),
+    })
 }
 
 pub fn next_items<T, IT: Iterator<Item = T>>(iter: &mut IT, n: usize) -> errors::Result<Vec<T>> {
@@ -41,7 +41,11 @@ macro_rules! trait_alias {
 */
 
 pub fn to_u16_dyn(slice: &[u8]) -> errors::Result<u16> {
-    Ok(Cursor::new(slice).read_u16::<BigEndian>()?)
+    Ok(Cursor::new(slice)
+        .read_u16::<BigEndian>()
+        .map_err(|e| Error::IOError {
+            what: std::error::Error::description(&e).into(),
+        })?)
 }
 
 pub fn to_u16(slice: &[u8; 2]) -> u16 {
@@ -49,7 +53,11 @@ pub fn to_u16(slice: &[u8; 2]) -> u16 {
 }
 
 pub fn to_u32_dyn(slice: &[u8]) -> errors::Result<u32> {
-    Ok(Cursor::new(slice).read_u32::<BigEndian>()?)
+    Ok(Cursor::new(slice)
+        .read_u32::<BigEndian>()
+        .map_err(|e| Error::IOError {
+            what: std::error::Error::description(&e).into(),
+        })?)
 }
 
 pub fn to_u32(slice: &[u8; 4]) -> u32 {

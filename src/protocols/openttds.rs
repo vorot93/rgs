@@ -20,10 +20,8 @@ fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models
     }
 
     let protocol_ver = next_item(&mut iter)?;
-    e.rules.insert(
-        "protocol-version".into(),
-        protocol_ver.into(),
-    );
+    e.rules
+        .insert("protocol-version".into(), protocol_ver.into());
     if protocol_ver >= 4 {
         let active_newgrf_num = next_item(&mut iter)?.clone();
         let active_newgrfs = {
@@ -41,14 +39,10 @@ fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models
             }
             v
         };
-        e.rules.insert(
-            "active-newgrfs-num".into(),
-            json!(active_newgrf_num),
-        );
-        e.rules.insert(
-            "active-newgrfs".into(),
-            json!(active_newgrfs),
-        );
+        e.rules
+            .insert("active-newgrfs-num".into(), json!(active_newgrf_num));
+        e.rules
+            .insert("active-newgrfs".into(), json!(active_newgrfs));
     }
 
     if protocol_ver >= 3 {
@@ -63,18 +57,12 @@ fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models
     }
 
     if protocol_ver >= 2 {
-        e.rules.insert(
-            "max-companies".into(),
-            json!(next_item(&mut iter)?),
-        );
-        e.rules.insert(
-            "current-companies".into(),
-            json!(next_item(&mut iter)?),
-        );
-        e.rules.insert(
-            "max-spectators".into(),
-            json!(next_item(&mut iter)?),
-        );
+        e.rules
+            .insert("max-companies".into(), json!(next_item(&mut iter)?));
+        e.rules
+            .insert("current-companies".into(), json!(next_item(&mut iter)?));
+        e.rules
+            .insert("max-spectators".into(), json!(next_item(&mut iter)?));
     }
     e.name = Some(util::read_string(&mut iter, 0)?);
     e.rules.insert(
@@ -82,17 +70,13 @@ fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models
         json!(try!(util::read_string(&mut iter, 0))),
     );
 
-    e.rules.insert(
-        "language-id".into(),
-        json!(next_item(&mut iter)?),
-    );
+    e.rules
+        .insert("language-id".into(), json!(next_item(&mut iter)?));
     e.need_pass = Some(next_item(&mut iter)? > 0);
     e.max_clients = Some(next_item(&mut iter)?.into());
     e.num_clients = Some(next_item(&mut iter)?.into());
-    e.rules.insert(
-        "current-spectators".into(),
-        json!(next_item(&mut iter)?),
-    );
+    e.rules
+        .insert("current-spectators".into(), json!(next_item(&mut iter)?));
     if protocol_ver < 3 {
         for _ in 0..2 {
             next_item(&mut iter)?;
@@ -102,21 +86,17 @@ fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models
         }
     }
 
-    e.terrain = Some(try!(util::read_string(&mut iter, 0)));
+    e.terrain = Some(util::read_string(&mut iter, 0)?);
     for _ in 0..2 {
         next_item(&mut iter)?;
     }
     for _ in 0..2 {
         next_item(&mut iter)?;
     }
-    e.rules.insert(
-        "map-set".into(),
-        json!(next_item(&mut iter)?),
-    );
-    e.rules.insert(
-        "dedicated".into(),
-        json!(next_item(&mut iter)?),
-    );
+    e.rules
+        .insert("map-set".into(), json!(next_item(&mut iter)?));
+    e.rules
+        .insert("dedicated".into(), json!(next_item(&mut iter)?));
 
     Ok(e)
 }
@@ -128,18 +108,11 @@ pub struct Protocol {
 
 impl Protocol {
     pub fn new(c: &pmodels::Config) -> errors::Result<Protocol> {
-        macro_rules! default { () => { "{{prelude-starter}}\x03{{prelude-finisher}}" } }
         Ok(Self {
             request_template: helpers::make_request_packet(
-                match c.get("request-template") {
-                    None => default!(),
-                    Some(v) => {
-                        match v.as_str() {
-                            None => default!(),
-                            Some(v) => v,
-                        }
-                    }
-                },
+                c.get("request-template")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("{{prelude-starter}}\x03{{prelude-finisher}}".into()),
                 c,
             )?,
         })
@@ -171,7 +144,18 @@ mod tests {
     use std::str::FromStr;
     fn fixtures() -> (std::net::SocketAddr, Vec<u8>, models::Server) {
         let addr = std::net::SocketAddr::from_str("127.0.0.1:9000").unwrap();
-        let data = vec![0x86, 0x00, 0x01, 0x04, 0x03, 0x4D, 0x47, 0x03, 0x05, 0x2E, 0x96, 0xB9, 0xAB, 0x2B, 0xEA, 0x68, 0x6B, 0xFF, 0x94, 0x96, 0x1A, 0xD4, 0x33, 0xA7, 0x01, 0x32, 0x32, 0x33, 0x22, 0x31, 0x61, 0x80, 0xDA, 0x1B, 0xA6, 0x44, 0x4A, 0x06, 0xCD, 0x17, 0xF8, 0xFA, 0x79, 0xD6, 0x0A, 0x44, 0x4E, 0x07, 0x00, 0x48, 0xB3, 0xF9, 0xE4, 0xFD, 0x0D, 0xF2, 0xA7, 0x2B, 0x5F, 0x44, 0xD3, 0xC8, 0xA2, 0xF4, 0xA0, 0x63, 0xEC, 0x0A, 0x00, 0x63, 0xEC, 0x0A, 0x00, 0x0F, 0x00, 0x0A, 0x4F, 0x6E, 0x6C, 0x79, 0x46, 0x72, 0x69, 0x65, 0x6E, 0x64, 0x73, 0x20, 0x4F, 0x70, 0x65, 0x6E, 0x54, 0x54, 0x44, 0x20, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x20, 0x23, 0x31, 0x00, 0x31, 0x2E, 0x35, 0x2E, 0x33, 0x00, 0x16, 0x00, 0x19, 0x00, 0x00, 0x52, 0x61, 0x6E, 0x64, 0x6F, 0x6D, 0x20, 0x4D, 0x61, 0x70, 0x00, 0x00, 0x04, 0x00, 0x04, 0x01, 0x01];
+        let data = vec![
+            0x86, 0x00, 0x01, 0x04, 0x03, 0x4D, 0x47, 0x03, 0x05, 0x2E, 0x96, 0xB9, 0xAB, 0x2B,
+            0xEA, 0x68, 0x6B, 0xFF, 0x94, 0x96, 0x1A, 0xD4, 0x33, 0xA7, 0x01, 0x32, 0x32, 0x33,
+            0x22, 0x31, 0x61, 0x80, 0xDA, 0x1B, 0xA6, 0x44, 0x4A, 0x06, 0xCD, 0x17, 0xF8, 0xFA,
+            0x79, 0xD6, 0x0A, 0x44, 0x4E, 0x07, 0x00, 0x48, 0xB3, 0xF9, 0xE4, 0xFD, 0x0D, 0xF2,
+            0xA7, 0x2B, 0x5F, 0x44, 0xD3, 0xC8, 0xA2, 0xF4, 0xA0, 0x63, 0xEC, 0x0A, 0x00, 0x63,
+            0xEC, 0x0A, 0x00, 0x0F, 0x00, 0x0A, 0x4F, 0x6E, 0x6C, 0x79, 0x46, 0x72, 0x69, 0x65,
+            0x6E, 0x64, 0x73, 0x20, 0x4F, 0x70, 0x65, 0x6E, 0x54, 0x54, 0x44, 0x20, 0x53, 0x65,
+            0x72, 0x76, 0x65, 0x72, 0x20, 0x23, 0x31, 0x00, 0x31, 0x2E, 0x35, 0x2E, 0x33, 0x00,
+            0x16, 0x00, 0x19, 0x00, 0x00, 0x52, 0x61, 0x6E, 0x64, 0x6F, 0x6D, 0x20, 0x4D, 0x61,
+            0x70, 0x00, 0x00, 0x04, 0x00, 0x04, 0x01, 0x01,
+        ];
         let mut srv = models::Server::new(addr.clone());
         srv.status = models::Status::Up;
         srv.name = Some("OnlyFriends OpenTTD Server #1".into());
@@ -214,9 +198,7 @@ mod tests {
 
     #[test]
     fn test_p_make_request() {
-        let fixture = json!({
-            "prelude-finisher": "\x00\x00",
-        });
+        let fixture = json!({});
 
         let expectation = vec![3, 0, 0];
         let result = IProtocol::new(&fixture.as_object().unwrap())

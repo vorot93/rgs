@@ -1,30 +1,17 @@
+extern crate failure;
+extern crate handlebars;
 extern crate std;
 
-extern crate handlebars;
+use self::failure::Fail;
 
-error_chain!{
-    foreign_links {
-        TemplateError(handlebars::TemplateRenderError);
-        ChannelRecvError(std::sync::mpsc::RecvError);
-        IOError(std::io::Error);
-        AddrParseError(std::net::AddrParseError);
-    }
-    errors {
-        NullError(t: String) {
-            description(""),
-            display("{}", t),
-        }
-        NetworkError(t: String) {
-            description(""),
-            display("{}", t),
-        }
-        TimeoutError(t: String) {
-            description(""),
-            display("{}", t),
-        }
-        InvalidPacketError(t: String) {
-            description(""),
-            display("{}", t),
-        }
-    }
+#[derive(Debug, Fail)]
+pub enum Error {
+    #[fail(display = "null error: {}", what)] NullError { what: String },
+    #[fail(display = "data parse error: {}", what)] DataParseError { what: String },
+    #[fail(display = "network error: {}", what)] NetworkError { what: String },
+    #[fail(display = "timeout error: {}", what)] TimeoutError { what: String },
+    #[fail(display = "invalid packet: {}", what)] InvalidPacketError { what: String },
+    #[fail(display = "IO error: {}", what)] IOError { what: String },
 }
+
+pub type Result<T> = std::result::Result<T, Error>;
