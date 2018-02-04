@@ -1,8 +1,9 @@
+extern crate futures_await as futures;
+extern crate rgs_models as models;
 extern crate std;
 
-extern crate rgs_models as models;
-
 use errors;
+use futures::prelude::*;
 use util;
 
 use protocols::helpers;
@@ -124,13 +125,13 @@ impl pmodels::Protocol for Protocol {
         self.request_template.clone()
     }
 
-    fn parse_response(&self, p: &pmodels::Packet) -> errors::Result<pmodels::ParseResult> {
+    fn parse_response(
+        &self,
+        p: &pmodels::Packet,
+    ) -> Box<Stream<Item = pmodels::ParseResult, Error = pmodels::Error>> {
         let mut v = parse_data(p.data.clone(), p.addr.clone())?;
         v.addr = p.addr.into();
-        Ok(pmodels::ParseResult {
-            servers: vec![v],
-            follow_up: vec![],
-        })
+        Box::new(futures::stream::iter_ok(pmodels::ParseResult::Output(v)))
     }
 }
 

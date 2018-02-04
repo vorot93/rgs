@@ -1,11 +1,12 @@
+extern crate futures_await as futures;
 extern crate rgs_models as models;
 extern crate serde_json;
 extern crate std;
 
 use errors;
-
+use errors::*;
+use futures::prelude::*;
 use std::str::FromStr;
-
 use std::sync::Arc;
 
 pub type Config = serde_json::Map<String, serde_json::Value>;
@@ -41,14 +42,14 @@ impl PartialEq for Query {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ParseResult {
-    pub servers: Vec<models::Server>,
-    pub follow_up: Vec<Query>,
+pub enum ParseResult {
+    FollowUp(Query),
+    Output(models::Server),
 }
 
 pub trait Protocol: std::fmt::Debug + Send + Sync {
     fn make_request(&self) -> Vec<u8>;
-    fn parse_response(&self, p: &Packet) -> errors::Result<ParseResult>;
+    fn parse_response(&self, p: Packet) -> Box<Stream<Item = ParseResult, Error = Error>>;
 }
 
 pub type TProtocol = Arc<Protocol>;

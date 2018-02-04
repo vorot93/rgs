@@ -1,9 +1,10 @@
-extern crate std;
-
+extern crate futures_await as futures;
 extern crate rgs_models as models;
+extern crate std;
 
 use errors;
 use errors::Error;
+use futures::prelude::*;
 use protocols::models as pmodels;
 use util;
 use util::*;
@@ -88,8 +89,11 @@ impl pmodels::Protocol for Protocol {
         vec![2, 2]
     }
 
-    fn parse_response(&self, p: &pmodels::Packet) -> errors::Result<pmodels::ParseResult> {
-        unimplemented!()
+    fn parse_response(
+        &self,
+        p: &pmodels::Packet,
+    ) -> Box<Stream<Item = pmodels::ParseResult, Error = Error>> {
+        Box::new(futures::stream::iter_ok(vec![]))
     }
 }
 
