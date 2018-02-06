@@ -30,9 +30,10 @@ use futures::sync::mpsc::{Receiver, Sender};
 use std::net::SocketAddr;
 use std::time::Duration;
 use protocols::models as pmodels;
-use tokio_core::net::UdpSocket;
+use tokio_core::net::{UdpCodec, UdpFramed, UdpSocket};
 use tokio_timer::Timer;
 
+pub mod dns;
 #[macro_use]
 pub mod errors;
 #[macro_use]
@@ -72,11 +73,16 @@ impl ServerEntry {
     }
 }
 
-pub type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, pmodels::TProtocol>>>;
+type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, pmodels::TProtocol>>>;
 
 pub enum FullParseResult {
     FollowUp(pmodels::Query),
     Output(ServerEntry),
+}
+
+trait Parser
+    : Sink<SinkItem = pmodels::Packet, SinkError = Error> + Stream<Item = FullParseResult, Error = Error>
+    {
 }
 
 pub struct RealParser {
@@ -141,83 +147,95 @@ impl Stream for RealParser {
     }
 }
 
-pub struct PlaceholderUdpCodec;
+impl Parser for RealParser {}
 
-impl tokio_core::net::UdpCodec for PlaceholderUdpCodec {
-    type In = pmodels::Packet;
-    type Out = pmodels::Packet;
+pub struct IncomingPacket {
+    pub addr: SocketAddr,
+    pub protocol: pmodels::TProtocol,
+    pub data: Vec<u8>,
+}
+
+pub struct UdpQueryCodec {
+    pub protocol_mapping: ProtocolMapping,
+    pub dns_history: dns::History,
+}
+
+impl tokio_core::net::UdpCodec for UdpQueryCodec {
+    type In = IncomingPacket;
+    type Out = dns::ResolvedQuery;
 
     fn decode(&mut self, addr: &SocketAddr, buf: &[u8]) -> io::Result<Self::In> {
-        Ok(pmodels::Packet {
+        let protocol = self.protocol_mapping
+            .lock()
+            .unwrap()
+            .get(addr)
+            .ok_or_else(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Could not determine server's protocol",
+                )
+            })?;
+        Ok(IncomingPacket {
+            protocol,
             addr: addr.clone(),
             data: buf.into(),
         })
     }
 
     fn encode(&mut self, v: Self::Out, into: &mut Vec<u8>) -> SocketAddr {
-        into.append(&mut v.data)
+        let pkt = v.protocol.make_request();
+        into.append(&mut v.data);
+        v.addr
     }
-}
-
-#[async]
-fn dns_resolve(
-    resolver: Arc<tokio_dns::Resolver>,
-    host: pmodels::Host,
-) -> Result<SocketAddr, Error> {
-    match host {
-        pmodels::Host::A(addr) => Ok(addr),
-        pmodels::Host::S(stringaddr) => await!(resolver.resolve(&stringaddr.host))
-            .map_err(|e| Error::NetworkError {
-                what: std::error::Error::description(&e).into(),
-            })?
-            .into_iter()
-            .next()
-            .map(|ipaddr| SocketAddr::new(ipaddr, stringaddr.port))
-            .ok_or_else(|| Error::NetworkError {
-                what: format!("Failed to resolve host {}", &stringaddr.host),
-            }),
-    }
-}
-
-enum SocketStatus {
-    Ready(UdpSocket),
-    Sending((pmodels::Query, Box<Future<Item = UdpSocket, Error = Error>>)),
 }
 
 /// Represents a single request by user to query the servers fed into sink.
 pub struct UdpQuery {
-    socket: SocketStatus,
-    dns_resolver: Arc<tokio_dns::Resolver + Sync + 'static>,
-
+    dns_history: dns::History,
     protocol_mapping: ProtocolMapping,
 
-    parser: Box<
-        Sink<SinkItem = pmodels::Packet, SinkError = Error>
-            + Stream<Item = FullParseResult, Error = Error>,
-    >,
-    query_sink: Sender<pmodels::Query>,
+    socket_sink: Box<Sink<SinkItem = pmodels::Packet, SinkError = io::Error>>,
+    socket_stream: Box<Stream<Item = pmodels::Packet, Error = Error>>,
+    dns_resolver: Box<dns::Resolver>,
+
+    parser: Box<Parser>,
+    input_sink: Sender<pmodels::Query>,
+    follow_up_sink: Sender<pmodels::Query>,
     query_stream: Receiver<pmodels::Query>,
 }
 
 impl UdpQuery {
     fn new<P, PF, D>(parser_builder: PF, dns_resolver: Arc<D>, socket: UdpSocket) -> Self
     where
-        P: Sink<SinkItem = pmodels::Packet, SinkError = Error>
-            + Stream<Item = FullParseResult, Error = Error>,
+        P: Parser,
         PF: FnOnce(ProtocolMapping) -> Box<P>,
         D: tokio_dns::Resolver + Sync + 'static,
     {
-        let (query_stream, query_sink) = futures::sync::mpsc::channel::<pmodels::Query>(1);
-        let protocol_mapping = Default::default();
+        let protocol_mapping = ProtocolMapping::default();
+        let dns_history = dns::History::default();
+
+        let (socket_sink, socket_stream) =
+            socket.framed(UdpQueryCodec { protocol_mapping }).split();
+
+        let (input_stream, input_sink) = futures::sync::mpsc::channel::<pmodels::Query>(1);
+        let (follow_up_stream, follow_up_sink) = futures::sync::mpsc::channel::<pmodels::Query>(1);
+        let query_stream = input_stream.select(follow_up_stream);
+
         let parser = (parser_builder)(protocol_mapping.clone());
+        let dns_resolver = dns::Resolver::new(dns_resolver, dns_history);
         Self {
             parser,
-            query_sink,
-            query_stream,
-            protocol_mapping,
-            socket: SocketStatus::Ready(socket),
-            query_sink,
             dns_resolver,
+
+            socket_sink: Box::new(socket_sink),
+            socket_stream: Box::new(socket_stream),
+
+            input_sink,
+            follow_up_sink,
+            query_stream,
+
+            protocol_mapping,
+            dns_history,
         }
     }
 }
@@ -229,7 +247,7 @@ fn udp_send(
     addr: pmodels::Host,
     data: Vec<u8>,
 ) -> errors::Result<()> {
-    if let Ok(addr) = await!(dns_resolve(dns_resolver.clone(), addr)) {
+    if let Ok(addr) = await!(dns::resolve_host(dns_resolver.clone(), addr)) {
         let (socket, _) = await!(socket.send_dgram(data, addr))?;
     }
 
@@ -245,7 +263,8 @@ impl Sink for UdpQuery {
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        match self.socket.as_mut() {
+        if self.socket_sink.as_mut() {
+            /*
             SocketStatus::Sending((query, mut fut)) => {
                 if let Async::Ready(socket) = fut.poll()? {
                     self.socket = SocketStatus::Ready(socket);
@@ -278,6 +297,7 @@ impl Sink for UdpQuery {
                     Ok(Async::NotReady)
                 }
             }
+            */
         }
     }
 
@@ -291,15 +311,6 @@ impl Stream for UdpQuery {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        if self.parser.poll_ready()? {
-            if let SocketStatus::Ready(socket) = self.socket {
-                let mut data = vec![];
-                if let Async::Ready(_) = socket.recv_dgram(&mut data) {
-                    self.parser.try_send(pmodels::Packet { addr, data })
-                }
-            }
-        }
-
         if let Async::Ready(v) = self.parser.poll()? {
             match v {
                 Some(data) => match data {
@@ -322,14 +333,7 @@ impl Stream for UdpQuery {
 
 /// It can be used to spawn multiple UdpQueries.
 pub struct UdpQueryServer {
-    parser_builder: Box<
-        Fn(
-            ProtocolMapping
-        ) -> Box<
-            Sink<SinkItem = pmodels::Packet, SinkError = Error>
-                + Stream<Item = FullParseResult, Error = Error>,
-        >,
-    >,
+    parser_builder: Box<Fn(ProtocolMapping) -> Box<Parser>>,
     dns_resolver: Box<Fn() -> Box<tokio_dns::Resolver>>,
 }
 
@@ -348,12 +352,7 @@ impl UdpQueryServer {
 
     fn with_parser_builder<PB>(self, parser_builder: PB) -> Self
     where
-        PB: Fn(
-            ProtocolMapping
-        ) -> Box<
-            Sink<SinkItem = pmodels::Packet, SinkError = Error>
-                + Stream<Item = FullParseResult, Error = Error>,
-        >,
+        PB: Fn(ProtocolMapping) -> Box<Parser>,
     {
         self.parser_builder = parser_builder;
         self
