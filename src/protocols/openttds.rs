@@ -131,9 +131,12 @@ impl pmodels::Protocol for Protocol {
         &self,
         p: pmodels::Packet,
     ) -> Box<Stream<Item = pmodels::ParseResult, Error = Error>> {
-        let mut v = parse_data(p.data, p.addr.clone())?;
-        v.addr = p.addr.into();
-        Box::new(futures::stream::iter_ok(pmodels::ParseResult::Output(v)))
+        Box::new(futures::stream::iter_result(vec![
+            parse_data(p.data, p.addr.clone()).map(|v| {
+                v.addr = p.addr.into();
+                pmodels::ParseResult::Output(v)
+            }),
+        ]))
     }
 }
 

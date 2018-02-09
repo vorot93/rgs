@@ -25,12 +25,11 @@ use std::io;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use futures::prelude::*;
-use futures::sync::mpsc::{Receiver, Sender};
+use futures::sync::mpsc::Sender;
 use std::net::SocketAddr;
 use protocols::models as pmodels;
 use pmodels::TProtocol;
-use tokio_core::net::{UdpCodec, UdpFramed, UdpSocket};
-use tokio_timer::Timer;
+use tokio_core::net::UdpSocket;
 
 pub mod dns;
 #[macro_use]
@@ -204,10 +203,10 @@ pub struct UdpQuery {
 }
 
 impl UdpQuery {
-    fn new<D>(dns_resolver: Arc<D>, socket: UdpSocket) -> Self
-    where
-        D: tokio_dns::Resolver + Send + Sync + 'static,
-    {
+    fn new(
+        dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
+        socket: UdpSocket,
+    ) -> Self {
         let protocol_mapping = ProtocolMapping::default();
         let dns_history = dns::History::default();
 
@@ -319,9 +318,8 @@ pub struct UdpQueryServer {
 impl UdpQueryServer {
     fn new() -> Self {
         Self {
-            dns_resolver: Arc::<tokio_dns::Resolver + Send + Sync + 'static>::new(
-                tokio_dns::CpuPoolResolver::new(8),
-            ),
+            dns_resolver: Arc::new(tokio_dns::CpuPoolResolver::new(8))
+                as Arc<tokio_dns::Resolver + Send + Sync + 'static>,
         }
     }
 
@@ -331,6 +329,6 @@ impl UdpQueryServer {
     }
 
     fn make_query(&self, socket: UdpSocket) -> UdpQuery {
-        UdpQuery::new(self.dns_resolver.clone(), socket)
+        UdpQuery::new(Arc::clone(&self.dns_resolver), socket)
     }
 }

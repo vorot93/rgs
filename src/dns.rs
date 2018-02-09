@@ -7,7 +7,6 @@ use errors;
 use errors::Error;
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;
-use protocols;
 use protocols::models as pmodels;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -49,16 +48,13 @@ pub struct Resolver {
 }
 
 impl Resolver {
-    pub fn new<R>(resolver: Arc<R>, history: History) -> Self
-    where
-        R: tokio_dns::Resolver + Send + Sync + 'static,
-    {
+    pub fn new(
+        resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
+        history: History,
+    ) -> Self {
         let mut pending_requests = FuturesUnordered::new();
-        pending_requests.push(
-            Box::<Future<Item = Option<ResolvedQuery>, Error = Error>>::new(
-                futures::future::empty(),
-            ),
-        );
+        pending_requests.push(Box::new(futures::future::empty())
+            as Box<Future<Item = Option<ResolvedQuery>, Error = Error>>);
         Self {
             inner: resolver,
             history,
@@ -72,16 +68,14 @@ impl Sink for Resolver {
     type SinkError = Error;
 
     fn start_send(&mut self, query: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        self.pending_requests.push(
+        self.pending_requests.push(Box::new(
             resolve_host(self.inner, query.host.clone())
                 .inspect({
                     let host = query.host.clone();
                     let history = Arc::clone(&self.history);
-                    move |&res| {
-                        if let Some(ref addr) = res {
-                            if let pmodels::Host::S(ref s) = query.host {
-                                history.lock().unwrap().insert(addr.clone(), s.clone());
-                            }
+                    move |&addr| {
+                        if let pmodels::Host::S(ref s) = query.host {
+                            history.lock().unwrap().insert(addr.clone(), s.host.clone());
                         }
                     }
                 })
@@ -93,7 +87,7 @@ impl Sink for Resolver {
                     })
                 })
                 .or_else(|e| Ok(None)),
-        );
+        ));
         Ok(AsyncSink::Ready)
     }
 
@@ -113,10 +107,10 @@ impl Stream for Resolver {
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         if let Async::Ready(Some(result)) = self.pending_requests.poll()? {
             if let Some(resolved) = result {
-                return Async::Ready(resolved);
+                return Ok(Async::Ready(Some(resolved)));
             }
         }
 
-        Async::NotReady
+        Ok(Async::NotReady)
     }
 }

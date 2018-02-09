@@ -23,7 +23,7 @@ pub enum Error {
     PipeError { reason: String },
 }
 
-impl<T> From<futures::sync::mpsc::SendError<T>> for Error {
+impl<T: 'static> From<futures::sync::mpsc::SendError<T>> for Error {
     fn from(v: futures::sync::mpsc::SendError<T>) -> Self {
         Error::PipeError {
             reason: std::error::Error::description(&v).into(),

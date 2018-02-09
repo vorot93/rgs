@@ -3,11 +3,9 @@ extern crate rgs_models as models;
 extern crate serde_json;
 extern crate std;
 
-use errors;
 use errors::*;
 use futures::prelude::*;
 use serde_json::Value;
-use std::str::FromStr;
 use std::sync::Arc;
 
 pub type Config = serde_json::Map<String, serde_json::Value>;
@@ -38,7 +36,7 @@ pub struct UserQuery {
 
 impl PartialEq for UserQuery {
     fn eq(&self, other: &Self) -> bool {
-        self.host == other.addr && Arc::ptr_eq(&self.protocol, &other.protocol)
+        self.host == other.host && Arc::ptr_eq(&self.protocol, &other.protocol)
     }
 }
 
@@ -75,14 +73,16 @@ pub struct ServerResponse {
     pub data: Vec<u8>,
 }
 
+#[derive(Clone, Debug)]
 pub enum FollowUpQueryProtocol {
     This,
     Child(Arc<Protocol>),
 }
 
+#[derive(Clone, Debug)]
 pub struct FollowUpQuery {
     pub host: Host,
-    pub state: Value,
+    pub state: Option<Value>,
     pub protocol: FollowUpQueryProtocol,
 }
 
@@ -91,15 +91,15 @@ impl From<(FollowUpQuery, TProtocol)> for Query {
         Query {
             host: v.0.host,
             protocol: match v.0.protocol {
-                FollowUpQuery::This => v.1,
-                FollowUpQuery::Child(p) => p,
+                FollowUpQueryProtocol::This => v.1,
+                FollowUpQueryProtocol::Child(p) => p,
             },
             state: v.0.state,
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum ParseResult {
     FollowUp(FollowUpQuery),
     Output(models::Server),

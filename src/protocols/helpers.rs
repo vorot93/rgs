@@ -14,7 +14,7 @@ pub fn make_request_packet(
     config: &protocol_models::Config,
 ) -> errors::Result<Vec<u8>> {
     Ok(handlebars::Handlebars::new()
-        .template_render(template, config)
+        .render_template(template, config)
         .map_err(|e| Error::IOError {
             reason: std::error::Error::description(&e).into(),
         })?
