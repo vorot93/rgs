@@ -16,7 +16,7 @@ pub fn make_request_packet(
     Ok(handlebars::Handlebars::new()
         .template_render(template, config)
         .map_err(|e| Error::IOError {
-            what: std::error::Error::description(&e).into(),
+            reason: std::error::Error::description(&e).into(),
         })?
         .into_bytes())
 }

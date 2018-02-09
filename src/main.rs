@@ -38,7 +38,7 @@ fn main() {
     let requests = vec![
         pmodels::Query {
             protocol: pconfig.get("openttds".into()).unwrap().clone(),
-            addr: pmodels::Host::S(
+            host: pmodels::Host::S(
                 pmodels::StringAddr {
                     host: "ttd.duck.me.uk".into(),
                     port: 3979,

@@ -9,7 +9,7 @@ use errors::Error;
 
 pub fn next_item<T, IT: Iterator<Item = T>>(iter: &mut IT) -> errors::Result<T> {
     iter.next().ok_or(errors::Error::InvalidPacketError {
-        what: "Early EOF while parsing packet".into(),
+        reason: "Early EOF while parsing packet".into(),
     })
 }
 
@@ -44,7 +44,7 @@ pub fn to_u16_dyn(slice: &[u8]) -> errors::Result<u16> {
     Ok(Cursor::new(slice)
         .read_u16::<BigEndian>()
         .map_err(|e| Error::IOError {
-            what: std::error::Error::description(&e).into(),
+            reason: std::error::Error::description(&e).into(),
         })?)
 }
 
@@ -56,7 +56,7 @@ pub fn to_u32_dyn(slice: &[u8]) -> errors::Result<u32> {
     Ok(Cursor::new(slice)
         .read_u32::<BigEndian>()
         .map_err(|e| Error::IOError {
-            what: std::error::Error::description(&e).into(),
+            reason: std::error::Error::description(&e).into(),
         })?)
 }
 

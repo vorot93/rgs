@@ -1,11 +1,13 @@
 extern crate futures_await as futures;
 extern crate rgs_models as models;
+extern crate serde_json;
 extern crate std;
 
 use errors;
 use errors::Error;
 use futures::prelude::*;
 use protocols::models as pmodels;
+use serde_json::Value;
 use util;
 use util::*;
 use num_traits::FromPrimitive;
@@ -60,12 +62,12 @@ impl Protocol {
         {
             let t =
                 PktType::from_u8(next_item(&mut buf)?).ok_or_else(|| Error::InvalidPacketError {
-                    what: "Unknown packet type".into(),
+                    reason: "Unknown packet type".into(),
                 })?;
 
             if t != PktType::PacketUdpMasterResponseList {
                 return Err(Error::InvalidPacketError {
-                    what: format!("Invalid packet type: {:?}", t),
+                    reason: format!("Invalid packet type: {:?}", t),
                 });
             }
         }
@@ -73,25 +75,25 @@ impl Protocol {
         let len = util::to_u16(&[next_item(&mut buf)?, next_item(&mut buf)?]);
 
         match IPVer::from_u8(next_item(&mut buf)?).ok_or(Error::InvalidPacketError {
-            what: "Unknown IP type".into(),
+            reason: "Unknown IP type".into(),
         })? {
             IPVer::V4 => parse_v4(len, Box::from(buf)),
             IPVer::V6 => parse_v6(len, Box::from(buf)),
             _ => Err(Error::InvalidPacketError {
-                what: "Invalid IP type".into(),
+                reason: "Invalid IP type".into(),
             }),
         }
     }
 }
 
 impl pmodels::Protocol for Protocol {
-    fn make_request(&self) -> Vec<u8> {
+    fn make_request(&self, state: Option<Value>) -> Vec<u8> {
         vec![2, 2]
     }
 
     fn parse_response(
         &self,
-        p: &pmodels::Packet,
+        p: pmodels::Packet,
     ) -> Box<Stream<Item = pmodels::ParseResult, Error = Error>> {
         Box::new(futures::stream::iter_ok(vec![]))
     }

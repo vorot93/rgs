@@ -1,14 +1,15 @@
 extern crate futures_await as futures;
 extern crate rgs_models as models;
+extern crate serde_json;
 extern crate std;
 
 use errors;
 use errors::Error;
 use futures::prelude::*;
 use util;
-
 use protocols::helpers;
 use protocols::models as pmodels;
+use serde_json::Value;
 use util::*;
 
 fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models::Server> {
@@ -122,15 +123,15 @@ impl Protocol {
 }
 
 impl pmodels::Protocol for Protocol {
-    fn make_request(&self) -> Vec<u8> {
+    fn make_request(&self, state: Option<Value>) -> Vec<u8> {
         self.request_template.clone()
     }
 
     fn parse_response(
         &self,
-        p: &pmodels::Packet,
+        p: pmodels::Packet,
     ) -> Box<Stream<Item = pmodels::ParseResult, Error = Error>> {
-        let mut v = parse_data(p.data.clone(), p.addr.clone())?;
+        let mut v = parse_data(p.data, p.addr.clone())?;
         v.addr = p.addr.into();
         Box::new(futures::stream::iter_ok(pmodels::ParseResult::Output(v)))
     }

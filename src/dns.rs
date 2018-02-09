@@ -1,4 +1,5 @@
 extern crate futures_await as futures;
+extern crate serde_json;
 extern crate std;
 extern crate tokio_dns;
 
@@ -8,6 +9,7 @@ use futures::prelude::*;
 use futures::stream::FuturesUnordered;
 use protocols;
 use protocols::models as pmodels;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -21,13 +23,13 @@ pub fn resolve_host(
         pmodels::Host::A(addr) => Ok(addr),
         pmodels::Host::S(stringaddr) => await!(resolver.resolve(&stringaddr.host))
             .map_err(|e| Error::NetworkError {
-                what: std::error::Error::description(&e).into(),
+                reason: std::error::Error::description(&e).into(),
             })?
             .into_iter()
             .next()
             .map(|ipaddr| SocketAddr::new(ipaddr, stringaddr.port))
             .ok_or_else(|| Error::NetworkError {
-                what: format!("Failed to resolve host {}", &stringaddr.host),
+                reason: format!("Failed to resolve host {}", &stringaddr.host),
             }),
     }
 }
@@ -37,6 +39,7 @@ pub type History = Arc<Mutex<HashMap<SocketAddr, String>>>;
 pub struct ResolvedQuery {
     pub addr: SocketAddr,
     pub protocol: pmodels::TProtocol,
+    pub state: Option<Value>,
 }
 
 pub struct Resolver {
@@ -51,7 +54,11 @@ impl Resolver {
         R: tokio_dns::Resolver + Send + Sync + 'static,
     {
         let mut pending_requests = FuturesUnordered::new();
-        pending_requests.push(futures::future::empty());
+        pending_requests.push(
+            Box::<Future<Item = Option<ResolvedQuery>, Error = Error>>::new(
+                futures::future::empty(),
+            ),
+        );
         Self {
             inner: resolver,
             history,
@@ -64,22 +71,23 @@ impl Sink for Resolver {
     type SinkItem = pmodels::Query;
     type SinkError = Error;
 
-    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+    fn start_send(&mut self, query: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         self.pending_requests.push(
-            resolve_host(self.inner, item.addr)
+            resolve_host(self.inner, query.host.clone())
                 .inspect({
-                    let host = item.addr.clone();
-                    let history = Arc::clone(self.history);
+                    let host = query.host.clone();
+                    let history = Arc::clone(&self.history);
                     move |&addr| {
                         if let pmodels::Host::S(ref s) = *addr {
                             history.insert(addr.clone(), s.clone());
                         }
                     }
                 })
-                .map(|q| {
+                .map(|addr| {
                     Some(ResolvedQuery {
-                        addr: q.addr,
-                        protocol: q.protocol,
+                        addr: addr,
+                        protocol: query.protocol,
+                        state: query.state,
                     })
                 })
                 .or_else(|e| Ok(None)),
@@ -100,7 +108,7 @@ impl Stream for Resolver {
     type Item = ResolvedQuery;
     type Error = Error;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         self.pending_requests.poll()
     }
 }
