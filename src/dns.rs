@@ -77,15 +77,17 @@ impl Sink for Resolver {
                 .inspect({
                     let host = query.host.clone();
                     let history = Arc::clone(&self.history);
-                    move |&addr| {
-                        if let pmodels::Host::S(ref s) = *addr {
-                            history.insert(addr.clone(), s.clone());
+                    move |&res| {
+                        if let Some(ref addr) = res {
+                            if let pmodels::Host::S(ref s) = query.host {
+                                history.lock().unwrap().insert(addr.clone(), s.clone());
+                            }
                         }
                     }
                 })
                 .map(|addr| {
                     Some(ResolvedQuery {
-                        addr: addr,
+                        addr,
                         protocol: query.protocol,
                         state: query.state,
                     })
@@ -109,6 +111,12 @@ impl Stream for Resolver {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.pending_requests.poll()
+        if let Async::Ready(Some(result)) = self.pending_requests.poll()? {
+            if let Some(resolved) = result {
+                return Async::Ready(resolved);
+            }
+        }
+
+        Async::NotReady
     }
 }

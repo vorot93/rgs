@@ -37,4 +37,4 @@ serde_derive = "*"
 serde_json = "*"
 tokio-core = "*"
 tokio-timer = "*"
-tokio-dns-unofficial = "*"
+tokio-dns-unofficial = { git = "https://github.com/vorot93/tokio-dns" }
