@@ -69,12 +69,12 @@ impl Sink for Resolver {
 
     fn start_send(&mut self, query: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         self.pending_requests.push(Box::new(
-            resolve_host(self.inner, query.host.clone())
+            resolve_host(self.inner.clone(), query.host.clone())
                 .inspect({
                     let host = query.host.clone();
                     let history = Arc::clone(&self.history);
                     move |&addr| {
-                        if let pmodels::Host::S(ref s) = query.host {
+                        if let pmodels::Host::S(ref s) = host {
                             history.lock().unwrap().insert(addr.clone(), s.host.clone());
                         }
                     }

@@ -10,11 +10,12 @@ extern crate rgs_models as models;
 extern crate serde_json;
 extern crate tokio_core;
 
+use tokio_core::net::UdpSocket;
 use futures::prelude::*;
-use librgs::QueryService;
 use librgs::util::LoggingService;
 use librgs::protocols::models as pmodels;
 use serde_json::Value;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 fn main() {
     // let server = ("master.openttd.org", 3978);
@@ -36,7 +37,7 @@ fn main() {
     }
 
     let requests = vec![
-        pmodels::Query {
+        pmodels::UserQuery {
             protocol: pconfig.get("openttds".into()).unwrap().clone(),
             host: pmodels::Host::S(
                 pmodels::StringAddr {
@@ -47,12 +48,22 @@ fn main() {
         },
     ];
 
-    let query_manager = librgs::RealQueryService::default();
+    let query_builder = librgs::UdpQueryBuilder::new();
 
     let mut core = tokio_core::reactor::Core::new().unwrap();
+    let socket = UdpSocket::bind(
+        &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5678),
+        &core.handle(),
+    ).unwrap();
+    let (query_sink, server_stream) = query_builder.make_query(socket).split();
+
+    std::thread::spawn(move || {
+        let mut core = tokio_core::reactor::Core::new().unwrap();
+        core.run(query_sink.send_all(futures::stream::iter_ok(requests)));
+    });
+
     core.run(
-        query_manager
-            .query_udp(Box::new(futures::stream::iter_ok(requests)))
+        server_stream
             .inspect(|data| {
                 logger.info(&format!("{:?}", data));
             })

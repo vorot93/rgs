@@ -123,7 +123,7 @@ impl Protocol {
 }
 
 impl pmodels::Protocol for Protocol {
-    fn make_request(&self, state: Option<Value>) -> Vec<u8> {
+    fn make_request(&self, _state: Option<Value>) -> Vec<u8> {
         self.request_template.clone()
     }
 
@@ -131,9 +131,11 @@ impl pmodels::Protocol for Protocol {
         &self,
         p: pmodels::Packet,
     ) -> Box<Stream<Item = pmodels::ParseResult, Error = Error>> {
+        let data = p.data;
+        let addr = p.addr;
         Box::new(futures::stream::iter_result(vec![
-            parse_data(p.data, p.addr.clone()).map(|v| {
-                v.addr = p.addr.into();
+            parse_data(data, p.addr.clone()).map(move |mut v| {
+                v.addr = addr.into();
                 pmodels::ParseResult::Output(v)
             }),
         ]))

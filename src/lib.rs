@@ -80,14 +80,14 @@ pub enum FullParseResult {
 }
 
 pub struct ParseMuxer {
-    results_stream: Box<Stream<Item = FullParseResult, Error = Error>>,
+    results_stream: Option<Box<Stream<Item = FullParseResult, Error = Error>>>,
     protocol_mapping: ProtocolMapping,
 }
 
 impl ParseMuxer {
     pub fn new(protocol_mapping: ProtocolMapping) -> Self {
         Self {
-            results_stream: Box::new(futures::stream::iter_ok(vec![])),
+            results_stream: Some(Box::new(futures::stream::iter_ok(vec![]))),
             protocol_mapping,
         }
     }
@@ -100,20 +100,23 @@ impl Sink for ParseMuxer {
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         let (protocol, pkt) = item.into();
 
-        self.results_stream = Box::new(
-            self.results_stream.chain(
+        let mut results_stream = self.results_stream.take().unwrap();
+        results_stream = Box::new(
+            results_stream.chain(
                 pmodels::Protocol::parse_response(&*protocol, pkt)
-                    .map(|v| match v {
+                    .map(move |v| match v {
                         pmodels::ParseResult::FollowUp(q) => {
                             FullParseResult::FollowUp((q, TProtocol::clone(&protocol)).into())
                         }
-                        pmodels::ParseResult::Output(s) => {
-                            FullParseResult::Output(ServerEntry { protocol, data: s })
-                        }
+                        pmodels::ParseResult::Output(s) => FullParseResult::Output(ServerEntry {
+                            protocol: protocol.clone(),
+                            data: s,
+                        }),
                     })
                     .or_else(|e| Ok(FullParseResult::Error(e))),
             ),
         );
+        self.results_stream = Some(results_stream);
 
         Ok(AsyncSink::Ready)
     }
@@ -132,7 +135,7 @@ impl Stream for ParseMuxer {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.results_stream.poll()
+        self.results_stream.as_mut().unwrap().poll()
     }
 }
 
@@ -173,9 +176,10 @@ impl tokio_core::net::UdpCodec for UdpQueryCodec {
                     io::ErrorKind::InvalidData,
                     "Could not determine server's protocol",
                 )
-            })?;
+            })?
+            .clone();
         Ok(IncomingPacket {
-            protocol: protocol.clone(),
+            protocol,
             addr: addr.clone(),
             data: buf.into(),
         })
@@ -212,8 +216,8 @@ impl UdpQuery {
 
         let (socket_sink, socket_stream) = socket
             .framed(UdpQueryCodec {
-                protocol_mapping,
-                dns_history,
+                protocol_mapping: protocol_mapping.clone(),
+                dns_history: dns_history.clone(),
             })
             .split();
 
@@ -233,7 +237,7 @@ impl UdpQuery {
         }));
 
         let parser = ParseMuxer::new(protocol_mapping.clone());
-        let dns_resolver = dns::Resolver::new(dns_resolver, dns_history);
+        let dns_resolver = dns::Resolver::new(dns_resolver, dns_history.clone());
 
         let (parser_sink, parser_stream) = parser.split();
         let parser_stream = Box::new(parser_stream);
@@ -311,24 +315,27 @@ impl Stream for UdpQuery {
 }
 
 /// It can be used to spawn multiple UdpQueries.
-pub struct UdpQueryServer {
+pub struct UdpQueryBuilder {
     dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
 }
 
-impl UdpQueryServer {
-    fn new() -> Self {
+impl UdpQueryBuilder {
+    pub fn new() -> Self {
         Self {
             dns_resolver: Arc::new(tokio_dns::CpuPoolResolver::new(8))
                 as Arc<tokio_dns::Resolver + Send + Sync + 'static>,
         }
     }
 
-    fn with_dns_resolver(self, resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>) -> Self {
+    pub fn with_dns_resolver(
+        mut self,
+        resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
+    ) -> Self {
         self.dns_resolver = resolver;
         self
     }
 
-    fn make_query(&self, socket: UdpSocket) -> UdpQuery {
+    pub fn make_query(&self, socket: UdpSocket) -> UdpQuery {
         UdpQuery::new(Arc::clone(&self.dns_resolver), socket)
     }
 }
