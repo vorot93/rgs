@@ -187,6 +187,11 @@ impl tokio_core::net::UdpCodec for UdpQueryCodec {
 
     fn encode(&mut self, v: Self::Out, into: &mut Vec<u8>) -> SocketAddr {
         let mut data = v.protocol.make_request(v.state);
+        println!("{} {:?}", v.addr, &data);
+        self.protocol_mapping
+            .lock()
+            .unwrap()
+            .insert(v.addr.clone(), v.protocol);
         into.append(&mut data);
         v.addr
     }
@@ -221,20 +226,25 @@ impl UdpQuery {
             })
             .split();
 
-        let socket_sink = socket_sink.sink_map_err(|e| errors::Error::IOError {
-            reason: std::error::Error::description(&e).into(),
+        let socket_sink = socket_sink.sink_map_err(|e| {
+            println!("{:?}", &e);
+            errors::Error::IOError {
+                reason: format!("socket_sink error: {}", std::error::Error::description(&e)),
+            }
         });
         let socket_stream = socket_stream.map_err(|e| errors::Error::IOError {
-            reason: std::error::Error::description(&e).into(),
+            reason: format!(
+                "socket_stream error: {}",
+                std::error::Error::description(&e)
+            ),
         });
 
-        let (input_sink, input_stream) = futures::sync::mpsc::channel::<pmodels::Query>(1);
-        let (follow_up_sink, follow_up_stream) = futures::sync::mpsc::channel::<pmodels::Query>(1);
-        let query_stream = Box::new(input_stream.select(follow_up_stream).map_err(|_| {
-            Error::NetworkError {
-                reason: "Query stream returned an error".into(),
-            }
+        let (query_sink, query_stream) = futures::sync::mpsc::channel::<pmodels::Query>(1);
+        let query_stream = Box::new(query_stream.map_err(|_| Error::NetworkError {
+            reason: "Query stream returned an error".into(),
         }));
+
+        let (input_sink, follow_up_sink) = (query_sink.clone(), query_sink.clone());
 
         let parser = ParseMuxer::new(protocol_mapping.clone());
         let dns_resolver = dns::Resolver::new(dns_resolver, dns_history.clone());
@@ -287,6 +297,8 @@ impl Stream for UdpQuery {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        println!("Polling UdpQuery");
+
         self.query_to_dns.poll()?;
         self.dns_to_socket.poll()?;
         self.socket_to_parser.poll()?;
@@ -305,11 +317,13 @@ impl Stream for UdpQuery {
                     }
                 },
                 None => {
-                    return Ok(Async::Ready(None));
+                    // return Ok(Async::Ready(None));
+                    return Ok(Async::NotReady);
                 }
             }
         }
 
+        println!("Finishing poll with NotReady");
         Ok(Async::NotReady)
     }
 }

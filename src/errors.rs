@@ -2,6 +2,7 @@ extern crate failure;
 extern crate futures_await as futures;
 extern crate handlebars;
 extern crate std;
+extern crate tokio_timer;
 
 use self::failure::Fail;
 
@@ -13,19 +14,27 @@ pub enum Error {
     DataParseError { reason: String },
     #[fail(display = "network error: {}", reason)]
     NetworkError { reason: String },
-    #[fail(display = "timeout error: {}", reason)]
-    TimeoutError { reason: String },
     #[fail(display = "invalid packet: {}", reason)]
     InvalidPacketError { reason: String },
     #[fail(display = "IO error: {}", reason)]
     IOError { reason: String },
     #[fail(display = "pipe error: {}", reason)]
     PipeError { reason: String },
+    #[fail(display = "operation timed out: {}", reason)]
+    TimeoutError { reason: String },
 }
 
 impl<T: 'static> From<futures::sync::mpsc::SendError<T>> for Error {
     fn from(v: futures::sync::mpsc::SendError<T>) -> Self {
         Error::PipeError {
+            reason: std::error::Error::description(&v).into(),
+        }
+    }
+}
+
+impl<T: 'static> From<tokio_timer::TimeoutError<T>> for Error {
+    fn from(v: tokio_timer::TimeoutError<T>) -> Self {
+        Error::TimeoutError {
             reason: std::error::Error::description(&v).into(),
         }
     }
