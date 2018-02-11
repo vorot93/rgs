@@ -1,16 +1,16 @@
 extern crate futures_await as futures;
-extern crate rgs_models as models;
 extern crate serde_json;
 extern crate std;
 
 use errors;
 use errors::Error;
 use futures::prelude::*;
+use models;
+use num_traits::FromPrimitive;
 use protocols::models as pmodels;
 use serde_json::Value;
 use util;
 use util::*;
-use num_traits::FromPrimitive;
 
 #[derive(Clone, Debug, PartialEq, Primitive)]
 enum IPVer {

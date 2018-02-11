@@ -1,7 +1,7 @@
-#![feature(proc_macro)]
 #![feature(conservative_impl_trait)]
 #![feature(generators)]
-#![feature(trait_alias)]
+#![feature(proc_macro)]
+#![feature(try_trait)]
 
 #[macro_use]
 extern crate enum_primitive_derive;
@@ -12,12 +12,15 @@ extern crate log;
 extern crate num_traits;
 extern crate rand;
 extern crate resolve;
-extern crate rgs_models as models;
+#[macro_use]
+extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
 extern crate tokio_core;
 extern crate tokio_dns;
 extern crate tokio_timer;
+
+use protocols::models;
 
 use errors::Error;
 use models::Server;
@@ -103,7 +106,7 @@ impl Sink for ParseMuxer {
         let mut results_stream = self.results_stream.take().unwrap();
         results_stream = Box::new(
             results_stream.chain(
-                pmodels::Protocol::parse_response(&*protocol, pkt)
+                pmodels::Protocol::parse_response(&**protocol, pkt)
                     .map(move |v| match v {
                         pmodels::ParseResult::FollowUp(q) => {
                             FullParseResult::FollowUp((q, TProtocol::clone(&protocol)).into())
@@ -317,7 +320,6 @@ impl Stream for UdpQuery {
                     }
                 },
                 None => {
-                    // return Ok(Async::Ready(None));
                     return Ok(Async::NotReady);
                 }
             }

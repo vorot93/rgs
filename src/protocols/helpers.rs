@@ -3,10 +3,9 @@ extern crate std;
 extern crate handlebars;
 extern crate serde_json;
 
-extern crate rgs_models as models;
-
 use errors;
 use errors::Error;
+use models;
 use protocols::models as protocol_models;
 
 pub fn make_request_packet(

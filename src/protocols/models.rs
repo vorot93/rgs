@@ -1,12 +1,18 @@
 extern crate futures_await as futures;
-extern crate rgs_models as models;
+extern crate iso_country;
+extern crate serde;
 extern crate serde_json;
 extern crate std;
 
-use errors::*;
+use errors::Error;
 use futures::prelude::*;
-use serde_json::Value;
 use std::sync::Arc;
+use self::iso_country::Country as CountryBase;
+use std::ops::Deref;
+use std::str::FromStr;
+use self::serde::*;
+use self::serde::de::{Deserializer, Visitor};
+use serde_json::Value;
 
 pub type Config = serde_json::Map<String, serde_json::Value>;
 
@@ -66,20 +72,20 @@ impl From<Query> for UserQuery {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ServerResponse {
     pub host: Host,
     pub protocol: TProtocol,
     pub data: Vec<u8>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum FollowUpQueryProtocol {
     This,
-    Child(Arc<Protocol>),
+    Child(TProtocol),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FollowUpQuery {
     pub host: Host,
     pub state: Option<Value>,
@@ -99,10 +105,10 @@ impl From<(FollowUpQuery, TProtocol)> for Query {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ParseResult {
     FollowUp(FollowUpQuery),
-    Output(models::Server),
+    Output(Server),
 }
 
 /// Protocol defines a common way to communicate with queried servers of a single type.
@@ -113,5 +119,206 @@ pub trait Protocol: std::fmt::Debug + Send + Sync {
     fn parse_response(&self, p: Packet) -> Box<Stream<Item = ParseResult, Error = Error>>;
 }
 
-pub type TProtocol = Arc<Protocol>;
+#[derive(Clone, Debug)]
+pub struct TProtocol {
+    pub inner: Arc<Protocol>,
+}
+
+impl std::ops::Deref for TProtocol {
+    type Target = Arc<Protocol>;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl PartialEq for TProtocol {
+    fn eq(&self, other: &TProtocol) -> bool {
+        Arc::ptr_eq(&*self, other)
+    }
+}
+
 pub type ProtocolConfig = std::collections::HashMap<String, TProtocol>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Country(CountryBase);
+
+impl Deref for Country {
+    type Target = iso_country::Country;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Default for Country {
+    fn default() -> Country {
+        Country(CountryBase::Unspecified)
+    }
+}
+
+impl Serialize for Country {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.to_string().as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Country {
+    fn deserialize<D>(deserializer: D) -> Result<Country, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct CountryVisitor;
+        impl<'de> Visitor<'de> for CountryVisitor {
+            type Value = Country;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("ISO country code")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Country, E>
+            where
+                E: de::Error,
+            {
+                Ok(Country(
+                    CountryBase::from_str(value).unwrap_or(CountryBase::Unspecified),
+                ))
+            }
+        }
+        deserializer.deserialize_str(CountryVisitor)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Status {
+    Unspecified,
+    Up,
+    Down,
+}
+
+impl Default for Status {
+    fn default() -> Status {
+        Status::Unspecified
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Player {
+    pub name: String,
+    pub ping: Option<i64>,
+    pub info: serde_json::Map<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Server {
+    // Mandatory parameters
+    pub addr: std::net::SocketAddr,
+
+    #[serde(default)]
+    pub status: Status,
+
+    #[serde(default)]
+    pub country: Country,
+
+    #[serde(default)]
+    pub rules: serde_json::Map<String, Value>,
+
+    // Optional fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub need_pass: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mod_name: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_type: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terrain: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_clients: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_clients: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_bots: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secure: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ping: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub players: Option<Vec<Player>>,
+}
+
+impl Server {
+    pub fn new(addr: std::net::SocketAddr) -> Server {
+        Server {
+            addr: addr,
+            status: Status::default(),
+            country: Country::default(),
+            rules: serde_json::Map::default(),
+            name: Option::default(),
+            need_pass: Option::default(),
+            mod_name: Option::default(),
+            game_type: Option::default(),
+            terrain: Option::default(),
+            num_clients: Option::default(),
+            max_clients: Option::default(),
+            num_bots: Option::default(),
+            secure: Option::default(),
+            ping: Option::default(),
+            players: Option::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    extern crate serde_json;
+
+    fn fixtures() -> (Value, Server) {
+        let mut srv = Server::new(std::net::SocketAddr::from_str("127.0.0.1:9000").unwrap());
+        srv.status = Status::Up;
+        srv.country = Country(CountryBase::RU);
+        srv.rules.insert("protocol-version".into(), 84.into());
+
+        let ser = json!({
+            "addr": "127.0.0.1:9000",
+            "status": "Up",
+            "country": "RU",
+            "rules": {
+                "protocol-version": 84,
+            },
+        });
+
+        (ser, srv)
+    }
+
+    #[test]
+    fn serialization() {
+        let (expectation, fixture) = fixtures();
+
+        let result = serde_json::to_value(&fixture).unwrap();
+
+        assert_eq!(expectation, result);
+    }
+
+    #[test]
+    fn deserialization() {
+        let (fixture, expectation) = fixtures();
+
+        let result = serde_json::from_value(fixture).unwrap();
+
+        assert_eq!(expectation, result);
+    }
+}

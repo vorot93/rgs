@@ -1,15 +1,15 @@
 extern crate futures_await as futures;
-extern crate rgs_models as models;
 extern crate serde_json;
 extern crate std;
 
 use errors;
 use errors::Error;
 use futures::prelude::*;
-use util;
+use models;
 use protocols::helpers;
 use protocols::models as pmodels;
 use serde_json::Value;
+use util;
 use util::*;
 
 fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models::Server> {
@@ -211,7 +211,7 @@ mod tests {
         let expectation = vec![3, 0, 0];
         let result = IProtocol::new(&fixture.as_object().unwrap())
             .unwrap()
-            .make_request();
+            .make_request(None);
 
         assert_eq!(expectation, result);
     }
@@ -221,15 +221,14 @@ mod tests {
         let p = IProtocol::new(&Default::default()).unwrap();
         let (addr, data, server) = fixtures();
 
-        let expectation = pmodels::ParseResult {
-            servers: vec![server],
-            follow_up: vec![],
-        };
+        let expectation = vec![pmodels::ParseResult::Output(server)];
 
-        let (result, _) = p.parse_response(&pmodels::Packet {
+        let result = p.parse_response(pmodels::Packet {
             addr: addr,
             data: data,
-        }).unwrap();
+        }).wait()
+            .map(|res| res.unwrap())
+            .collect::<Vec<pmodels::ParseResult>>();
 
         assert_eq!(result, expectation);
     }

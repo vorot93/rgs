@@ -1,12 +1,7 @@
-#![feature(proc_macro)]
-#![feature(conservative_impl_trait)]
-#![feature(generators)]
-
 extern crate futures_await as futures;
 extern crate librgs;
 extern crate rand;
 extern crate resolve;
-extern crate rgs_models as models;
 extern crate serde_json;
 extern crate tokio_core;
 extern crate tokio_timer;
