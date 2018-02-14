@@ -9,6 +9,7 @@ use models;
 use num_traits::FromPrimitive;
 use protocols::models as pmodels;
 use serde_json::Value;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use util;
 use util::*;
 
@@ -36,27 +37,38 @@ enum PktType {
     PacketUdpEnd = 12,
 }
 
-fn parse_v4(
-    len: u16,
-    buf: Box<std::iter::Iterator<Item = u8>>,
-) -> errors::Result<Vec<std::net::IpAddr>> {
-    unimplemented!()
+#[async_stream(boxed, item=SocketAddrV4)]
+fn parse_v4<I>(len: u16, mut v: I) -> errors::Result<()>
+where
+    I: std::iter::IntoIterator<Item = u8> + 'static,
+{
+    let mut it = v.into_iter();
+    for i in 0..len {
+        let ip = Ipv4Addr::new(it.next()?, it.next()?, it.next()?, it.next()?);
+        let port = to_u16(&[it.next()?, it.next()?]);
+        stream_yield!(SocketAddrV4::new(ip, port));
+    }
+
+    Ok(())
 }
 
-fn parse_v6(
-    len: u16,
-    buf: Box<std::iter::Iterator<Item = u8>>,
-) -> errors::Result<Vec<std::net::IpAddr>> {
-    unimplemented!()
+#[async_stream(boxed, item=SocketAddrV6)]
+fn parse_v6<I>(len: u16, v: I) -> errors::Result<()>
+where
+    I: std::iter::IntoIterator<Item = u8> + 'static,
+{
+    Ok(())
 }
 
 #[derive(Debug)]
 pub struct Protocol {
     config: pmodels::Config,
+    child: Option<pmodels::TProtocol>,
 }
 
 impl Protocol {
-    fn parse_data(&self, b: Vec<u8>) -> errors::Result<Vec<std::net::IpAddr>> {
+    #[async_stream(item=SocketAddr)]
+    fn parse_data(b: Vec<u8>) -> errors::Result<()> {
         let mut buf = b.into_iter();
 
         {
@@ -74,15 +86,24 @@ impl Protocol {
 
         let len = util::to_u16(&[next_item(&mut buf)?, next_item(&mut buf)?]);
 
-        match IPVer::from_u8(next_item(&mut buf)?).ok_or(Error::InvalidPacketError {
+        let s: Box<Stream<Item = SocketAddr, Error = Error>> = match IPVer::from_u8(next_item(&mut buf)?).ok_or(Error::InvalidPacketError {
             reason: "Unknown IP type".into(),
         })? {
-            IPVer::V4 => parse_v4(len, Box::from(buf)),
-            IPVer::V6 => parse_v6(len, Box::from(buf)),
-            _ => Err(Error::InvalidPacketError {
-                reason: "Invalid IP type".into(),
-            }),
+            IPVer::V4 => Box::new(parse_v4(len, buf).map(SocketAddr::V4)),
+            IPVer::V6 => Box::new(parse_v6(len, buf).map(SocketAddr::V6)),
+            _ => {
+                return Err(Error::InvalidPacketError {
+                    reason: "Invalid IP type".into(),
+                });
+            }
+        };
+
+        #[async]
+        for e in s {
+            stream_yield!(e);
         }
+
+        Ok(())
     }
 }
 
