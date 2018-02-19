@@ -104,27 +104,12 @@ fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models
     Ok(e)
 }
 
-#[derive(Clone, Debug)]
-pub struct Protocol {
-    request_template: Vec<u8>,
-}
-
-impl Protocol {
-    pub fn new(c: &pmodels::Config) -> errors::Result<Protocol> {
-        Ok(Self {
-            request_template: helpers::make_request_packet(
-                c.get("request-template")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("{{prelude-starter}}\x03{{prelude-finisher}}".into()),
-                c,
-            )?,
-        })
-    }
-}
+#[derive(Debug)]
+pub struct Protocol;
 
 impl pmodels::Protocol for Protocol {
     fn make_request(&self, _state: Option<Value>) -> Vec<u8> {
-        self.request_template.clone()
+        vec![3, 0, 0]
     }
 
     fn parse_response(
@@ -147,7 +132,7 @@ mod tests {
     extern crate serde_json;
 
     use super::*;
-    use super::Protocol as IProtocol;
+    use super::Protocol as ProtocolImpl;
     use protocols::models::Protocol;
     use std::str::FromStr;
     fn fixtures() -> (std::net::SocketAddr, Vec<u8>, models::Server) {
@@ -209,16 +194,14 @@ mod tests {
         let fixture = json!({});
 
         let expectation = vec![3, 0, 0];
-        let result = IProtocol::new(&fixture.as_object().unwrap())
-            .unwrap()
-            .make_request(None);
+        let result = ProtocolImpl.make_request(None);
 
         assert_eq!(expectation, result);
     }
 
     #[test]
     fn test_p_parse_response() {
-        let p = IProtocol::new(&Default::default()).unwrap();
+        let p = ProtocolImpl;
         let (addr, data, server) = fixtures();
 
         let expectation = vec![pmodels::ParseResult::Output(server)];

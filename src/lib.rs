@@ -3,15 +3,19 @@
 #![feature(proc_macro)]
 #![feature(try_trait)]
 
+extern crate byteorder;
 #[macro_use]
 extern crate enum_primitive_derive;
 #[macro_use]
 extern crate failure;
 extern crate futures_await as futures;
+extern crate handlebars;
+extern crate iso_country;
 extern crate log;
 extern crate num_traits;
 extern crate rand;
 extern crate resolve;
+extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
@@ -84,14 +88,12 @@ pub enum FullParseResult {
 
 pub struct ParseMuxer {
     results_stream: Option<Box<Stream<Item = FullParseResult, Error = Error>>>,
-    protocol_mapping: ProtocolMapping,
 }
 
 impl ParseMuxer {
-    pub fn new(protocol_mapping: ProtocolMapping) -> Self {
+    pub fn new() -> Self {
         Self {
             results_stream: Some(Box::new(futures::stream::iter_ok(vec![]))),
-            protocol_mapping,
         }
     }
 }
@@ -249,7 +251,7 @@ impl UdpQuery {
 
         let (input_sink, follow_up_sink) = (query_sink.clone(), query_sink.clone());
 
-        let parser = ParseMuxer::new(protocol_mapping.clone());
+        let parser = ParseMuxer::new();
         let dns_resolver = dns::Resolver::new(dns_resolver, dns_history.clone());
 
         let (parser_sink, parser_stream) = parser.split();

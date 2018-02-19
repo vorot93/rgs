@@ -1,17 +1,17 @@
-extern crate futures_await as futures;
-extern crate iso_country;
-extern crate serde;
-extern crate serde_json;
-extern crate std;
+use futures;
+use iso_country;
+use serde;
+use serde_json;
+use std;
 
 use errors::Error;
 use futures::prelude::*;
+use iso_country::Country as CountryBase;
 use std::sync::Arc;
-use self::iso_country::Country as CountryBase;
 use std::ops::Deref;
 use std::str::FromStr;
-use self::serde::*;
-use self::serde::de::{Deserializer, Visitor};
+use serde::*;
+use serde::de::{Deserializer, Visitor};
 use serde_json::Value;
 
 pub type Config = serde_json::Map<String, serde_json::Value>;
@@ -121,7 +121,7 @@ pub trait Protocol: std::fmt::Debug + Send + Sync {
 
 #[derive(Clone, Debug)]
 pub struct TProtocol {
-    pub inner: Arc<Protocol>,
+    inner: Arc<Protocol>,
 }
 
 impl std::ops::Deref for TProtocol {
@@ -134,6 +134,12 @@ impl std::ops::Deref for TProtocol {
 impl PartialEq for TProtocol {
     fn eq(&self, other: &TProtocol) -> bool {
         Arc::ptr_eq(&*self, other)
+    }
+}
+
+impl From<Arc<Protocol + 'static>> for TProtocol {
+    fn from(v: Arc<Protocol + 'static>) -> TProtocol {
+        Self { inner: v }
     }
 }
 

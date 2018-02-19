@@ -18,28 +18,15 @@ fn main() {
     // let server = ("master.openttd.org", 3978);
     // let p = protocols::openttdm::P::default();
     let logger = librgs::util::RealLogger;
-    let mut pconfig = ProtocolConfig::new();
-
-    {
-        let server_p = librgs::protocols::make_protocol(
-            "openttds",
-            &{
-                let mut m = Config::default();
-                m.insert("prelude-finisher".into(), Value::String("\x00\x00".into()));
-                m
-            },
-            None,
-        );
-        pconfig.insert("openttds".into(), server_p.unwrap().unwrap());
-    }
+    let mut pconfig = librgs::protocols::make_default_protocols();
 
     let requests = vec![
         UserQuery {
-            protocol: pconfig.get("openttds".into()).unwrap().clone(),
+            protocol: pconfig.get("openttdm".into()).unwrap().clone(),
             host: Host::S(
                 StringAddr {
-                    host: "ttd.duck.me.uk".into(),
-                    port: 3979,
+                    host: "master.openttd.org".into(),
+                    port: 3978,
                 }.into(),
             ),
         },

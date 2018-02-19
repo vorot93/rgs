@@ -1,10 +1,9 @@
-extern crate failure;
-extern crate futures_await as futures;
-extern crate handlebars;
-extern crate std;
-extern crate tokio_timer;
+use failure;
+use futures;
+use std;
+use tokio_timer;
 
-use self::failure::Fail;
+use failure::Fail;
 
 #[derive(Debug, Fail)]
 pub enum Error {

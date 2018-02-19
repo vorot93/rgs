@@ -1,7 +1,7 @@
-extern crate futures_await as futures;
-extern crate serde_json;
-extern crate std;
-extern crate tokio_dns;
+use futures;
+use serde_json;
+use std;
+use tokio_dns;
 
 use errors;
 use errors::Error;

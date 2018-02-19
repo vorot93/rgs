@@ -1,10 +1,10 @@
-extern crate byteorder;
-extern crate std;
+use byteorder;
+use std;
 
 use errors;
 
 use std::io::Cursor;
-use self::byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt};
 use errors::Error;
 
 pub fn next_item<T, IT: Iterator<Item = T>>(iter: &mut IT) -> errors::Result<T> {

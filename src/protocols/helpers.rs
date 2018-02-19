@@ -1,7 +1,6 @@
-extern crate std;
-
-extern crate handlebars;
-extern crate serde_json;
+use std;
+use handlebars;
+use serde_json;
 
 use errors;
 use errors::Error;

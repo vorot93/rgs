@@ -6,17 +6,20 @@ pub mod openttds;
 pub mod q3s;
 
 use errors;
+use models::{Protocol, TProtocol};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-pub fn make_protocol(
-    s: &str,
-    config: &models::Config,
-    follow_up: Option<models::TProtocol>,
-) -> errors::Result<Option<models::TProtocol>> {
-    match s {
-        "openttds" => Ok(Some(models::TProtocol {
-            inner: Arc::new(openttds::Protocol::new(config)?),
-        })),
-        _ => Ok(None),
-    }
+pub fn make_default_protocols() -> HashMap<String, TProtocol> {
+    let mut out = HashMap::new();
+
+    let openttds_proto = TProtocol::from(Arc::new(openttds::Protocol) as Arc<Protocol + 'static>);
+    out.insert("openttds".into(), openttds_proto.clone());
+
+    let openttdm_proto = TProtocol::from(Arc::new(openttdm::ProtocolImpl {
+        child: Some(openttds_proto.clone()),
+    }) as Arc<Protocol + 'static>);
+    out.insert("openttdm".into(), openttdm_proto);
+
+    out
 }
