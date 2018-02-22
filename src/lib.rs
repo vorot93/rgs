@@ -33,6 +33,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use futures::prelude::*;
 use futures::sync::mpsc::Sender;
+use futures::task;
 use std::net::SocketAddr;
 use protocols::models as pmodels;
 use pmodels::TProtocol;
@@ -231,11 +232,8 @@ impl UdpQuery {
             })
             .split();
 
-        let socket_sink = socket_sink.sink_map_err(|e| {
-            println!("{:?}", &e);
-            errors::Error::IOError {
-                reason: format!("socket_sink error: {}", std::error::Error::description(&e)),
-            }
+        let socket_sink = socket_sink.sink_map_err(|e| errors::Error::IOError {
+            reason: format!("socket_sink error: {}", std::error::Error::description(&e)),
         });
         let socket_stream = socket_stream.map_err(|e| errors::Error::IOError {
             reason: format!(
@@ -302,8 +300,6 @@ impl Stream for UdpQuery {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        println!("Polling UdpQuery");
-
         self.query_to_dns.poll()?;
         self.dns_to_socket.poll()?;
         self.socket_to_parser.poll()?;
@@ -327,7 +323,6 @@ impl Stream for UdpQuery {
             }
         }
 
-        println!("Finishing poll with NotReady");
         Ok(Async::NotReady)
     }
 }

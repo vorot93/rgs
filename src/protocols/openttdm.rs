@@ -1,24 +1,24 @@
 use errors;
+use errors::Error;
 use models;
 use util;
+use util::*;
 
+use byteorder::{LittleEndian, NetworkEndian};
 use futures;
 use serde_json;
 use std;
-
-use errors::Error;
 use futures::prelude::*;
 use num_traits::FromPrimitive;
 use protocols::models as pmodels;
 use serde_json::Value;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
-use util::*;
 
+/// Source: https://git.openttd.org/?p=trunk.git;a=blob;f=src/network/core/udp.h;hb=HEAD#l41
 #[derive(Clone, Debug, PartialEq, Primitive)]
 enum IPVer {
-    V4 = 0,
-    V6 = 1,
-    AUTODETECT = 2,
+    V4 = 1,
+    V6 = 2,
 }
 
 #[derive(Clone, Debug, PartialEq, Primitive)]
@@ -44,9 +44,9 @@ where
     I: std::iter::IntoIterator<Item = u8> + 'static,
 {
     let mut it = v.into_iter();
-    for i in 0..len {
+    for _ in 0..len {
         let ip = Ipv4Addr::new(it.next()?, it.next()?, it.next()?, it.next()?);
-        let port = to_u16(&[it.next()?, it.next()?]);
+        let port = util::to_u16::<LittleEndian>(&[it.next()?, it.next()?]);
         stream_yield!(SocketAddrV4::new(ip, port));
     }
 
@@ -67,9 +67,12 @@ where
 fn parse_data(b: Vec<u8>) -> errors::Result<()> {
     let mut buf = b.into_iter();
 
+    let len = util::to_u16::<LittleEndian>(&[next_item(&mut buf)?, next_item(&mut buf)?]);
+
     {
-        let t = PktType::from_u8(next_item(&mut buf)?).ok_or_else(|| Error::InvalidPacketError {
-            reason: "Unknown packet type".into(),
+        let num = next_item(&mut buf)?;
+        let t = PktType::from_u8(num).ok_or_else(|| Error::InvalidPacketError {
+            reason: format!("Unknown packet type: {}", num),
         })?;
 
         if t != PktType::PacketUdpMasterResponseList {
@@ -79,20 +82,16 @@ fn parse_data(b: Vec<u8>) -> errors::Result<()> {
         }
     }
 
-    let len = util::to_u16(&[next_item(&mut buf)?, next_item(&mut buf)?]);
+    let ip_ver = IPVer::from_u8(next_item(&mut buf)?).ok_or(Error::InvalidPacketError {
+        reason: "Unknown IP type".into(),
+    })?;
 
-    let s: Box<Stream<Item = SocketAddr, Error = Error>> =
-        match IPVer::from_u8(next_item(&mut buf)?).ok_or(Error::InvalidPacketError {
-            reason: "Unknown IP type".into(),
-        })? {
-            IPVer::V4 => Box::new(parse_v4(len, buf).map(SocketAddr::V4)),
-            IPVer::V6 => Box::new(parse_v6(len, buf).map(SocketAddr::V6)),
-            _ => {
-                return Err(Error::InvalidPacketError {
-                    reason: "Invalid IP type".into(),
-                });
-            }
-        };
+    let host_num = util::to_u16::<LittleEndian>(&[next_item(&mut buf)?, next_item(&mut buf)?]);
+
+    let s: Box<Stream<Item = SocketAddr, Error = Error>> = match ip_ver {
+        IPVer::V4 => Box::new(parse_v4(host_num, buf).map(SocketAddr::V4)),
+        IPVer::V6 => Box::new(parse_v6(host_num, buf).map(SocketAddr::V6)),
+    };
 
     #[async]
     for e in s {
@@ -108,8 +107,8 @@ pub struct ProtocolImpl {
 }
 
 impl pmodels::Protocol for ProtocolImpl {
-    fn make_request(&self, state: Option<Value>) -> Vec<u8> {
-        vec![2, 2]
+    fn make_request(&self, _state: Option<Value>) -> Vec<u8> {
+        vec![5, 0, 6, 2, 2]
     }
 
     fn parse_response(
@@ -134,9 +133,10 @@ impl pmodels::Protocol for ProtocolImpl {
 mod tests {
     use super::*;
 
+    use std::collections::HashSet;
     use std::str::FromStr;
 
-    fn fixtures() -> (Vec<u8>, Vec<std::net::SocketAddr>) {
+    fn fixtures() -> (Vec<u8>, Vec<SocketAddr>) {
         let data = vec![
             0x42, 0x00, 0x07, 0x01, 0x0A, 0x00, 0x4A, 0xD0, 0x4B, 0xB7, 0x8B, 0x0F, 0xAC, 0xF9,
             0xB0, 0x91, 0x8B, 0x0F, 0x53, 0xC7, 0x18, 0x16, 0x8B, 0x0F, 0x3E, 0x8F, 0x2E, 0x44,
@@ -156,10 +156,9 @@ mod tests {
             "178.235.178.87:3979",
             "128.72.74.113:3979",
             "64.138.231.54:3979",
-            "74.208.75.183:3980",
         ].into_iter()
-            .map(|s| std::net::SocketAddr::from_str(s).unwrap())
-            .collect::<Vec<std::net::SocketAddr>>();
+            .map(|s| SocketAddr::from_str(s).unwrap())
+            .collect::<Vec<SocketAddr>>();
 
         (data, srv_list)
     }
@@ -168,6 +167,12 @@ mod tests {
     fn test_p_parse_response() {
         let (data, srv_list) = fixtures();
 
-        assert_eq!(parse_data(data).wait().map(Result::unwrap).collect::<Vec<std::net::SocketAddr>>(), srv_list)
+        assert_eq!(
+            parse_data(data)
+                .wait()
+                .map(Result::unwrap)
+                .collect::<Vec<SocketAddr>>(),
+            srv_list
+        )
     }
 }

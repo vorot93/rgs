@@ -11,14 +11,13 @@ use futures::prelude::*;
 use librgs::util::LoggingService;
 use librgs::protocols::models::*;
 use librgs::errors::Error;
-use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 fn main() {
     // let server = ("master.openttd.org", 3978);
     // let p = protocols::openttdm::P::default();
     let logger = librgs::util::RealLogger;
-    let mut pconfig = librgs::protocols::make_default_protocols();
+    let pconfig = librgs::protocols::make_default_protocols();
 
     let requests = vec![
         UserQuery {
@@ -58,8 +57,8 @@ fn main() {
         Box::new(request_fut) as Box<Future<Item = (), Error = Error>>,
         Box::new(
             server_stream
-                .inspect(move |data| {
-                    logger.info(&format!("{:?}", data));
+                .inspect(move |entry| {
+                    logger.info(&serde_json::to_string(&entry.clone().into_inner().1).unwrap());
                 })
                 .for_each(|_| Ok(())),
         ),

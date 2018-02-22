@@ -1,18 +1,18 @@
-extern crate futures_await as futures;
-extern crate serde_json;
-extern crate std;
-
 use errors;
 use errors::Error;
-use futures::prelude::*;
+use util;
+use util::*;
 use models;
 use protocols::helpers;
 use protocols::models as pmodels;
-use serde_json::Value;
-use util;
-use util::*;
 
-fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models::Server> {
+use byteorder::{LittleEndian, NetworkEndian};
+use futures;
+use futures::prelude::*;
+use serde_json::Value;
+use std::net::SocketAddr;
+
+fn parse_data(buf: Vec<u8>, addr: SocketAddr) -> errors::Result<models::Server> {
     let mut e = models::Server::new(addr);
     e.status = models::Status::Up;
 
@@ -51,11 +51,11 @@ fn parse_data(buf: Vec<u8>, addr: std::net::SocketAddr) -> errors::Result<models
     if protocol_ver >= 3 {
         e.rules.insert(
             "time-current".into(),
-            json!(util::to_u32_dyn(next_items(&mut iter, 4)?.as_slice()).unwrap()),
+            json!(util::to_u32_dyn::<NetworkEndian>(next_items(&mut iter, 4)?.as_slice()).unwrap()),
         );
         e.rules.insert(
             "time-start".into(),
-            json!(util::to_u32_dyn(next_items(&mut iter, 4)?.as_slice()).unwrap()),
+            json!(util::to_u32_dyn::<NetworkEndian>(next_items(&mut iter, 4)?.as_slice()).unwrap()),
         );
     }
 
@@ -135,8 +135,8 @@ mod tests {
     use super::Protocol as ProtocolImpl;
     use protocols::models::Protocol;
     use std::str::FromStr;
-    fn fixtures() -> (std::net::SocketAddr, Vec<u8>, models::Server) {
-        let addr = std::net::SocketAddr::from_str("127.0.0.1:9000").unwrap();
+    fn fixtures() -> (SocketAddr, Vec<u8>, models::Server) {
+        let addr = SocketAddr::from_str("127.0.0.1:9000").unwrap();
         let data = vec![
             0x86, 0x00, 0x01, 0x04, 0x03, 0x4D, 0x47, 0x03, 0x05, 0x2E, 0x96, 0xB9, 0xAB, 0x2B,
             0xEA, 0x68, 0x6B, 0xFF, 0x94, 0x96, 0x1A, 0xD4, 0x33, 0xA7, 0x01, 0x32, 0x32, 0x33,
