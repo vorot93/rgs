@@ -31,7 +31,7 @@ fn main() {
         },
     ];
 
-    let query_builder = librgs::UdpQueryBuilder::new();
+    let query_builder = librgs::UdpQueryBuilder::default();
 
     let mut core = tokio_core::reactor::Core::new().unwrap();
     let socket = UdpSocket::bind(

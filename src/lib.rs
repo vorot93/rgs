@@ -332,14 +332,16 @@ pub struct UdpQueryBuilder {
     dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
 }
 
-impl UdpQueryBuilder {
-    pub fn new() -> Self {
+impl Default for UdpQueryBuilder {
+    fn default() -> Self {
         Self {
             dns_resolver: Arc::new(tokio_dns::CpuPoolResolver::new(8))
                 as Arc<tokio_dns::Resolver + Send + Sync + 'static>,
         }
     }
+}
 
+impl UdpQueryBuilder {
     pub fn with_dns_resolver(
         mut self,
         resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
