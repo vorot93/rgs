@@ -186,7 +186,7 @@ impl tokio_core::net::UdpCodec for UdpQueryCodec {
             .clone();
         Ok(IncomingPacket {
             protocol,
-            addr: addr.clone(),
+            addr: *addr,
             data: buf.into(),
         })
     }
