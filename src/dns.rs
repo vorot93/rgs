@@ -1,17 +1,15 @@
-use futures;
-use serde_json;
-use std;
-use tokio_dns;
-
 use errors;
 use errors::Error;
+use futures;
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;
 use protocols::models as pmodels;
 use serde_json::Value;
+use std;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use tokio_dns;
 
 #[async]
 pub fn resolve_host(

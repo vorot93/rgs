@@ -7,12 +7,12 @@ use std;
 use errors::Error;
 use futures::prelude::*;
 use iso_country::Country as CountryBase;
-use std::sync::Arc;
+use serde::de::{Deserializer, Visitor};
+use serde::*;
+use serde_json::Value;
 use std::ops::Deref;
 use std::str::FromStr;
-use serde::*;
-use serde::de::{Deserializer, Visitor};
-use serde_json::Value;
+use std::sync::Arc;
 
 pub type Config = serde_json::Map<String, serde_json::Value>;
 

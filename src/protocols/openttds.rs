@@ -1,10 +1,10 @@
 use errors;
 use errors::Error;
-use util;
-use util::*;
 use models;
 use protocols::helpers;
 use protocols::models as pmodels;
+use util;
+use util::*;
 
 use byteorder::{LittleEndian, NetworkEndian};
 use futures;
@@ -131,8 +131,8 @@ impl pmodels::Protocol for Protocol {
 mod tests {
     extern crate serde_json;
 
+    use super::Protocol;
     use super::*;
-    use super::Protocol as ProtocolImpl;
     use protocols::models::Protocol;
     use std::str::FromStr;
     fn fixtures() -> (SocketAddr, Vec<u8>, models::Server) {
@@ -194,14 +194,14 @@ mod tests {
         let fixture = json!({});
 
         let expectation = vec![3, 0, 0];
-        let result = ProtocolImpl.make_request(None);
+        let result = Protocol.make_request(None);
 
         assert_eq!(expectation, result);
     }
 
     #[test]
     fn test_p_parse_response() {
-        let p = ProtocolImpl;
+        let p = Protocol;
         let (addr, data, server) = fixtures();
 
         let expectation = vec![pmodels::ParseResult::Output(server)];

@@ -1,11 +1,12 @@
 use errors::Error;
-use protocols::models as pmodels;
-use pmodels::{Packet, ParseResult};
+use protocols;
+use protocols::models::{Packet, ParseResult};
 
 use futures;
 use futures::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 
 fn parse_rulestring(data: String) -> Result<HashMap<String, String>, Error> {
     let mut out = HashMap::<String, String>::default();
@@ -48,14 +49,33 @@ pub enum Rule {
     ServerName,
 }
 
+#[async_stream(item=SocketAddr)]
+fn parse_data(response_prelude: Vec<u8>, mut buf: Vec<u8>, addr: SocketAddr) -> Result<(), Error> {
+    if buf.len() < response_prelude.len() {
+        return Err(Error::DataParseError {
+            reason: "Packet is shorter than response prelude.".into(),
+        });
+    }
+
+    if buf.drain(0..response_prelude.len()).collect::<Vec<u8>>() != response_prelude {
+        return Err(Error::DataParseError {
+            reason: "Packet does not match response prelude".into(),
+        });
+    }
+
+    Ok(())
+}
+
+/// Quake III Arena server protocol implementation
 #[derive(Debug)]
 pub struct Protocol {
     pub protocol_ver: u8,
     pub default_request_port: u8,
+    pub response_prelude: Vec<u8>,
     pub rule_names: HashMap<Rule, String>,
 }
 
-impl pmodels::Protocol for Protocol {
+impl protocols::models::Protocol for Protocol {
     fn make_request(&self, state: Option<Value>) -> Vec<u8> {
         let mut out = vec![255, 255, 255, 255];
         out.append(&mut Vec::from("getstatus RGS".as_bytes()));

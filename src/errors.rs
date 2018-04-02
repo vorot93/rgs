@@ -37,10 +37,10 @@ impl<T: 'static> From<futures::sync::mpsc::SendError<T>> for Error {
     }
 }
 
-impl<T: 'static> From<tokio_timer::TimeoutError<T>> for Error {
-    fn from(v: tokio_timer::TimeoutError<T>) -> Self {
+impl<T: std::fmt::Display + 'static> From<tokio_timer::DeadlineError<T>> for Error {
+    fn from(v: tokio_timer::DeadlineError<T>) -> Self {
         Error::TimeoutError {
-            reason: std::error::Error::description(&v).into(),
+            reason: v.to_string(),
         }
     }
 }

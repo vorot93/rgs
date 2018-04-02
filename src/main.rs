@@ -6,12 +6,12 @@ extern crate serde_json;
 extern crate tokio_core;
 extern crate tokio_timer;
 
-use tokio_core::net::UdpSocket;
 use futures::prelude::*;
-use librgs::util::LoggingService;
-use librgs::protocols::models::*;
 use librgs::errors::Error;
+use librgs::protocols::models::*;
+use librgs::util::LoggingService;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use tokio_core::net::UdpSocket;
 
 fn main() {
     // let server = ("master.openttd.org", 3978);
@@ -46,23 +46,21 @@ fn main() {
         Ok(())
     });
 
-    let timer = tokio_timer::Timer::default();
-
     let timeout = std::time::Duration::from_secs(10);
 
     println!("Starting core");
 
-    core.run(timer.timeout(
+    core.run(tokio_timer::Deadline::new(
         futures::future::join_all(vec![
-        Box::new(request_fut) as Box<Future<Item = (), Error = Error>>,
-        Box::new(
-            server_stream
-                .inspect(move |entry| {
-                    logger.info(&serde_json::to_string(&entry.clone().into_inner().1).unwrap());
-                })
-                .for_each(|_| Ok(())),
-        ),
-    ]),
-        timeout,
+            Box::new(request_fut) as Box<Future<Item = (), Error = Error>>,
+            Box::new(
+                server_stream
+                    .inspect(move |entry| {
+                        logger.info(&serde_json::to_string(&entry.clone().into_inner().1).unwrap());
+                    })
+                    .for_each(|_| Ok(())),
+            ),
+        ]),
+        std::time::Instant::now() + timeout,
     ));
 }

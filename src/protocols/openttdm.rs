@@ -6,12 +6,12 @@ use util::*;
 
 use byteorder::{LittleEndian, NetworkEndian};
 use futures;
-use serde_json;
-use std;
 use futures::prelude::*;
 use num_traits::FromPrimitive;
 use protocols::models as pmodels;
+use serde_json;
 use serde_json::Value;
+use std;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 /// Source: https://git.openttd.org/?p=trunk.git;a=blob;f=src/network/core/udp.h;hb=HEAD#l41
@@ -102,11 +102,11 @@ fn parse_data(b: Vec<u8>) -> errors::Result<()> {
 }
 
 #[derive(Debug)]
-pub struct ProtocolImpl {
+pub struct Protocol {
     pub child: Option<pmodels::TProtocol>,
 }
 
-impl pmodels::Protocol for ProtocolImpl {
+impl pmodels::Protocol for Protocol {
     fn make_request(&self, _state: Option<Value>) -> Vec<u8> {
         vec![5, 0, 6, 2, 2]
     }

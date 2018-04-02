@@ -3,9 +3,9 @@ use std;
 
 use errors;
 
-use std::io::Cursor;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use errors::Error;
+use std::io::Cursor;
 
 pub fn next_item<T, IT: Iterator<Item = T>>(iter: &mut IT) -> errors::Result<T> {
     iter.next().ok_or(errors::Error::InvalidPacketError {

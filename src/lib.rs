@@ -1,3 +1,9 @@
+//!
+//! Asynchronous utilities for querying game servers.
+//!
+//! The `rgs` crate provides tools to asynchronously retrieve game server information like
+//! IP, server metadata, player list and more.
+
 #![feature(conservative_impl_trait)]
 #![feature(generators)]
 #![feature(proc_macro)]
@@ -27,16 +33,15 @@ extern crate tokio_timer;
 use protocols::models;
 
 use errors::Error;
-use models::Server;
-use std::io;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use futures::prelude::*;
 use futures::sync::mpsc::Sender;
-use futures::task;
-use std::net::SocketAddr;
-use protocols::models as pmodels;
+use models::Server;
 use pmodels::TProtocol;
+use protocols::models as pmodels;
+use std::collections::HashMap;
+use std::io;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use tokio_core::net::UdpSocket;
 
 pub mod dns;
