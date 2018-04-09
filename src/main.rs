@@ -1,4 +1,4 @@
-extern crate futures_await as futures;
+extern crate futures;
 extern crate librgs;
 extern crate rand;
 extern crate resolve;
@@ -62,5 +62,5 @@ fn main() {
             ),
         ]),
         std::time::Instant::now() + timeout,
-    ));
+    )).unwrap();
 }

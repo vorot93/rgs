@@ -131,7 +131,7 @@ impl pmodels::Protocol for Protocol {
 mod tests {
     extern crate serde_json;
 
-    use super::Protocol;
+    use super::Protocol as ProtocolImpl;
     use super::*;
     use protocols::models::Protocol;
     use std::str::FromStr;
@@ -194,14 +194,14 @@ mod tests {
         let fixture = json!({});
 
         let expectation = vec![3, 0, 0];
-        let result = Protocol.make_request(None);
+        let result = ProtocolImpl.make_request(None);
 
         assert_eq!(expectation, result);
     }
 
     #[test]
     fn test_p_parse_response() {
-        let p = Protocol;
+        let p = ProtocolImpl;
         let (addr, data, server) = fixtures();
 
         let expectation = vec![pmodels::ParseResult::Output(server)];

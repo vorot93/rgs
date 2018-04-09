@@ -4,17 +4,12 @@
 //! The `rgs` crate provides tools to asynchronously retrieve game server information like
 //! IP, server metadata, player list and more.
 
-#![feature(conservative_impl_trait)]
-#![feature(generators)]
-#![feature(proc_macro)]
-#![feature(try_trait)]
-
 extern crate byteorder;
 #[macro_use]
 extern crate enum_primitive_derive;
 #[macro_use]
 extern crate failure;
-extern crate futures_await as futures;
+extern crate futures;
 extern crate handlebars;
 extern crate iso_country;
 extern crate log;

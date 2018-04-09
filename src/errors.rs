@@ -23,12 +23,6 @@ pub enum Error {
     TimeoutError { reason: String },
 }
 
-impl From<std::option::NoneError> for Error {
-    fn from(v: std::option::NoneError) -> Self {
-        Error::NullError { reason: "".into() }
-    }
-}
-
 impl<T: 'static> From<futures::sync::mpsc::SendError<T>> for Error {
     fn from(v: futures::sync::mpsc::SendError<T>) -> Self {
         Error::PipeError {

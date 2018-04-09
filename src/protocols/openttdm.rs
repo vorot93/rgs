@@ -12,6 +12,7 @@ use protocols::models as pmodels;
 use serde_json;
 use serde_json::Value;
 use std;
+use std::collections::VecDeque;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 /// Source: https://git.openttd.org/?p=trunk.git;a=blob;f=src/network/core/udp.h;hb=HEAD#l41
@@ -38,67 +39,177 @@ enum PktType {
     PacketUdpEnd = 12,
 }
 
-#[async_stream(boxed, item=SocketAddrV4)]
-fn parse_v4<I>(len: u16, v: I) -> errors::Result<()>
-where
-    I: std::iter::IntoIterator<Item = u8> + 'static,
-{
-    let mut it = v.into_iter();
-    for _ in 0..len {
-        let ip = Ipv4Addr::new(it.next()?, it.next()?, it.next()?, it.next()?);
-        let port = util::to_u16::<LittleEndian>(&[it.next()?, it.next()?]);
-        stream_yield!(SocketAddrV4::new(ip, port));
+#[derive(Clone, Debug, Default)]
+struct IPv4Parser {
+    host_buf: VecDeque<u8>,
+    port_buf: VecDeque<u8>,
+}
+
+impl IPv4Parser {
+    fn host_buf_full(&self) -> bool {
+        self.host_buf.len() >= 4
     }
 
-    Ok(())
+    fn port_buf_full(&self) -> bool {
+        self.port_buf.len() >= 2
+    }
 }
 
-#[async_stream(boxed, item=SocketAddrV6)]
-fn parse_v6<I>(len: u16, v: I) -> errors::Result<()>
-where
-    I: std::iter::IntoIterator<Item = u8> + 'static,
-{
-    let mut it = v.into_iter();
+impl Sink for IPv4Parser {
+    type SinkItem = u8;
+    type SinkError = Error;
 
-    Ok(())
-}
-
-#[async_stream(item=SocketAddr)]
-fn parse_data(b: Vec<u8>) -> errors::Result<()> {
-    let mut buf = b.into_iter();
-
-    let len = util::to_u16::<LittleEndian>(&[next_item(&mut buf)?, next_item(&mut buf)?]);
-
-    {
-        let num = next_item(&mut buf)?;
-        let t = PktType::from_u8(num).ok_or_else(|| Error::InvalidPacketError {
-            reason: format!("Unknown packet type: {}", num),
-        })?;
-
-        if t != PktType::PacketUdpMasterResponseList {
-            return Err(Error::InvalidPacketError {
-                reason: format!("Invalid packet type: {:?}", t),
-            });
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        if !self.host_buf_full() {
+            self.host_buf.push_back(item);
+            Ok(AsyncSink::Ready)
+        } else {
+            if !self.port_buf_full() {
+                self.port_buf.push_back(item);
+                Ok(AsyncSink::Ready)
+            } else {
+                Ok(AsyncSink::NotReady(item))
+            }
         }
     }
 
-    let ip_ver = IPVer::from_u8(next_item(&mut buf)?).ok_or(Error::InvalidPacketError {
-        reason: "Unknown IP type".into(),
-    })?;
-
-    let host_num = util::to_u16::<LittleEndian>(&[next_item(&mut buf)?, next_item(&mut buf)?]);
-
-    let s: Box<Stream<Item = SocketAddr, Error = Error>> = match ip_ver {
-        IPVer::V4 => Box::new(parse_v4(host_num, buf).map(SocketAddr::V4)),
-        IPVer::V6 => Box::new(parse_v6(host_num, buf).map(SocketAddr::V6)),
-    };
-
-    #[async]
-    for e in s {
-        stream_yield!(e);
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        Ok(Async::Ready(()))
     }
 
-    Ok(())
+    fn close(&mut self) -> Poll<(), Self::SinkError> {
+        Ok(Async::Ready(()))
+    }
+}
+
+impl Stream for IPv4Parser {
+    type Item = SocketAddrV4;
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        if !self.host_buf_full() || !self.port_buf_full() {
+            Ok(Async::NotReady)
+        } else {
+            let ip = Ipv4Addr::new(
+                self.host_buf.pop_front().unwrap(),
+                self.host_buf.pop_front().unwrap(),
+                self.host_buf.pop_front().unwrap(),
+                self.host_buf.pop_front().unwrap(),
+            );
+            let port = util::to_u16::<LittleEndian>(&[
+                self.port_buf.pop_front().unwrap(),
+                self.port_buf.pop_front().unwrap(),
+            ]);
+
+            let addr = SocketAddrV4::new(ip, port);
+            Ok(Async::Ready(Some(addr)))
+        }
+    }
+}
+
+struct DataParser {
+    buf: VecDeque<u8>,
+    hosts_left: u16,
+    chunk_size: u8,
+    byte_sink: Box<Sink<SinkItem = u8, SinkError = Error>>,
+    inner_stream: Box<Stream<Item = SocketAddr, Error = Error>>,
+}
+
+impl DataParser {
+    fn next(&mut self) -> Result<u8, Error> {
+        self.buf
+            .pop_front()
+            .ok_or_else(|| Error::InvalidPacketError {
+                reason: "Unexpected EOF".into(),
+            })
+    }
+}
+
+impl DataParser {
+    fn new<T: Into<VecDeque<u8>>>(buf: T) -> Result<Self, Error> {
+        let mut buf = buf.into();
+        let hosts_left: u16;
+        let chunk_size: u8;
+        let byte_sink: Box<Sink<SinkItem = u8, SinkError = Error>>;
+        let inner_stream: Box<Stream<Item = SocketAddr, Error = Error>>;
+        {
+            let mut next = || {
+                buf.pop_front().ok_or_else(|| Error::InvalidPacketError {
+                    reason: "Unexpected EOF".into(),
+                })
+            };
+
+            let len = util::to_u16::<LittleEndian>(&[next()?, next()?]);
+
+            {
+                let num = next()?;
+                let t = PktType::from_u8(num).ok_or_else(|| Error::InvalidPacketError {
+                    reason: format!("Unknown packet type: {}", num),
+                })?;
+
+                if t != PktType::PacketUdpMasterResponseList {
+                    return Err(Error::InvalidPacketError {
+                        reason: format!("Invalid packet type: {:?}", t),
+                    });
+                }
+            }
+
+            let ip_ver = IPVer::from_u8(next()?).ok_or(Error::InvalidPacketError {
+                reason: "Unknown IP type".into(),
+            })?;
+
+            hosts_left = util::to_u16::<LittleEndian>(&[next()?, next()?]);
+
+            let (a, b, c): (
+                Box<Stream<Item = SocketAddr, Error = Error>>,
+                Box<Sink<SinkItem = u8, SinkError = Error>>,
+                u8,
+            ) = match ip_ver {
+                IPVer::V4 => {
+                    let (byte_sink, inner_stream) =
+                        IPv4Parser::default().map(SocketAddr::V4).split();
+                    let chunk_size = 6;
+                    (Box::new(inner_stream), Box::new(byte_sink), chunk_size)
+                }
+                IPVer::V6 => (
+                    Box::new(futures::stream::empty()),
+                    Box::new(Vec::new().sink_map_err(|_| unreachable!())),
+                    18,
+                ),
+            };
+            inner_stream = a;
+            byte_sink = b;
+            chunk_size = c;
+        }
+
+        Ok(Self {
+            buf,
+            hosts_left,
+            chunk_size,
+            byte_sink,
+            inner_stream,
+        })
+    }
+}
+
+impl Stream for DataParser {
+    type Item = SocketAddr;
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        if self.hosts_left == 0 {
+            Ok(Async::Ready(None))
+        } else {
+            for _ in 0..self.chunk_size {
+                let b = self.next()?;
+                self.byte_sink.start_send(b)?;
+            }
+
+            self.hosts_left -= 1;
+
+            self.inner_stream.poll()
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -116,13 +227,16 @@ impl pmodels::Protocol for Protocol {
         p: pmodels::Packet,
     ) -> Box<Stream<Item = pmodels::ParseResult, Error = Error>> {
         if let Some(child) = self.child.clone() {
-            Box::new(parse_data(p.data).map(move |addr| {
-                pmodels::ParseResult::FollowUp(pmodels::FollowUpQuery {
-                    host: pmodels::Host::A(addr),
-                    protocol: pmodels::FollowUpQueryProtocol::Child(child.clone()),
-                    state: None,
-                })
-            }))
+            match DataParser::new(p.data) {
+                Ok(parser) => Box::new(parser.map(move |addr| {
+                    pmodels::ParseResult::FollowUp(pmodels::FollowUpQuery {
+                        host: pmodels::Host::A(addr),
+                        protocol: pmodels::FollowUpQueryProtocol::Child(child.clone()),
+                        state: None,
+                    })
+                })),
+                Err(e) => Box::new(futures::stream::iter_result(vec![Err(e)])),
+            }
         } else {
             Box::new(futures::stream::iter_ok(vec![]))
         }
@@ -168,10 +282,12 @@ mod tests {
         let (data, srv_list) = fixtures();
 
         assert_eq!(
-            parse_data(data)
+            DataParser::new(data)
+                .unwrap()
+                .inspect(|addr| println!("{}", addr))
+                .collect()
                 .wait()
-                .map(Result::unwrap)
-                .collect::<Vec<SocketAddr>>(),
+                .unwrap(),
             srv_list
         )
     }

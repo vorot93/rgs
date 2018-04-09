@@ -21,11 +21,11 @@ name = "rgs"
 path = "src/main.rs"
 
 [dependencies]
-failure = "*"
-failure_derive = "*"
 byteorder = "*"
 enum-primitive-derive = "*"
-futures-await = { git = "https://github.com/ngg/futures-await", branch = "0.1", version = "0.1" }
+failure = "*"
+failure_derive = "*"
+futures = "*"
 handlebars = "*"
 iso_country = "*"
 log = "*"

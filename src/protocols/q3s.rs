@@ -49,8 +49,11 @@ pub enum Rule {
     ServerName,
 }
 
-#[async_stream(item=SocketAddr)]
-fn parse_data(response_prelude: Vec<u8>, mut buf: Vec<u8>, addr: SocketAddr) -> Result<(), Error> {
+fn parse_data(
+    response_prelude: Vec<u8>,
+    mut buf: Vec<u8>,
+    addr: SocketAddr,
+) -> Result<Box<Stream<Item = SocketAddr, Error = Error>>, Error> {
     if buf.len() < response_prelude.len() {
         return Err(Error::DataParseError {
             reason: "Packet is shorter than response prelude.".into(),
@@ -63,7 +66,7 @@ fn parse_data(response_prelude: Vec<u8>, mut buf: Vec<u8>, addr: SocketAddr) -> 
         });
     }
 
-    Ok(())
+    Ok(Box::new(futures::stream::empty()))
 }
 
 /// Quake III Arena server protocol implementation

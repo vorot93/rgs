@@ -11,23 +11,28 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio_dns;
 
-#[async]
 pub fn resolve_host(
     resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
     host: pmodels::Host,
-) -> errors::Result<SocketAddr> {
+) -> Box<Future<Item = SocketAddr, Error = errors::Error>> {
     match host {
-        pmodels::Host::A(addr) => Ok(addr),
-        pmodels::Host::S(stringaddr) => await!(resolver.resolve(&stringaddr.host))
-            .map_err(|e| Error::NetworkError {
-                reason: std::error::Error::description(&e).into(),
-            })?
-            .into_iter()
-            .next()
-            .map(|ipaddr| SocketAddr::new(ipaddr, stringaddr.port))
-            .ok_or_else(|| Error::NetworkError {
-                reason: format!("Failed to resolve host {}", &stringaddr.host),
-            }),
+        pmodels::Host::A(addr) => Box::new(futures::future::ok(addr)),
+        pmodels::Host::S(stringaddr) => Box::new(
+            resolver
+                .resolve(&stringaddr.host)
+                .map_err(|e| Error::NetworkError {
+                    reason: std::error::Error::description(&e).into(),
+                })
+                .and_then(move |addrs| {
+                    addrs
+                        .into_iter()
+                        .next()
+                        .map(|ipaddr| SocketAddr::new(ipaddr, stringaddr.port))
+                        .ok_or_else(|| Error::NetworkError {
+                            reason: format!("Failed to resolve host {}", &stringaddr.host),
+                        })
+                }),
+        ),
     }
 }
 
