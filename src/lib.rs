@@ -205,9 +205,6 @@ impl tokio_core::net::UdpCodec for UdpQueryCodec {
 
 /// Represents a single request by user to query the servers fed into sink.
 pub struct UdpQuery {
-    dns_history: dns::History,
-    protocol_mapping: ProtocolMapping,
-
     query_to_dns: Box<Future<Item = (), Error = Error>>,
     dns_to_socket: Box<Future<Item = (), Error = Error>>,
     socket_to_parser: Box<Future<Item = (), Error = Error>>,
@@ -264,9 +261,6 @@ impl UdpQuery {
         let socket_to_parser = Box::new(parser_sink.send_all(socket_stream).map(|_| ()));
 
         Self {
-            protocol_mapping,
-            dns_history,
-
             query_to_dns,
             dns_to_socket,
             socket_to_parser,
