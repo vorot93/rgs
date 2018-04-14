@@ -1,5 +1,5 @@
 use errors::Error;
-use protocols::models::{Packet, ParseResult, Protocol, Server};
+use models::{Packet, ParseResult, Protocol, ProtocolResultStream, Server};
 
 use futures;
 use futures::prelude::*;
@@ -115,7 +115,7 @@ impl Protocol for Q3SProtocol {
         v
     }
 
-    fn parse_response(&self, p: Packet) -> Box<Stream<Item = ParseResult, Error = Error>> {
+    fn parse_response(&self, p: Packet) -> ProtocolResultStream {
         Box::new(futures::stream::iter_result(vec![
             parse_data(self.response_prelude.clone(), p.data, p.addr).map(ParseResult::Output),
         ]))

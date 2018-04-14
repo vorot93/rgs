@@ -1,9 +1,10 @@
 use errors;
 use errors::Error;
+use models::*;
+
 use futures;
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;
-use protocols::models as pmodels;
 use serde_json::Value;
 use std;
 use std::collections::HashMap;
@@ -13,11 +14,11 @@ use tokio_dns;
 
 pub fn resolve_host(
     resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
-    host: pmodels::Host,
-) -> Box<Future<Item = SocketAddr, Error = errors::Error>> {
+    host: Host,
+) -> Box<Future<Item = SocketAddr, Error = errors::Error> + Send> {
     match host {
-        pmodels::Host::A(addr) => Box::new(futures::future::ok(addr)),
-        pmodels::Host::S(stringaddr) => Box::new(
+        Host::A(addr) => Box::new(futures::future::ok(addr)),
+        Host::S(stringaddr) => Box::new(
             resolver
                 .resolve(&stringaddr.host)
                 .map_err(|e| Error::NetworkError {
@@ -40,14 +41,15 @@ pub type History = Arc<Mutex<HashMap<SocketAddr, String>>>;
 
 pub struct ResolvedQuery {
     pub addr: SocketAddr,
-    pub protocol: pmodels::TProtocol,
+    pub protocol: TProtocol,
     pub state: Option<Value>,
 }
 
 pub struct Resolver {
     inner: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
     history: History,
-    pending_requests: FuturesUnordered<Box<Future<Item = Option<ResolvedQuery>, Error = Error>>>,
+    pending_requests:
+        FuturesUnordered<Box<Future<Item = Option<ResolvedQuery>, Error = Error> + Send>>,
 }
 
 impl Resolver {
@@ -57,7 +59,7 @@ impl Resolver {
     ) -> Self {
         let mut pending_requests = FuturesUnordered::new();
         pending_requests.push(Box::new(futures::future::empty())
-            as Box<Future<Item = Option<ResolvedQuery>, Error = Error>>);
+            as Box<Future<Item = Option<ResolvedQuery>, Error = Error> + Send>);
         Self {
             inner: resolver,
             history,
@@ -67,7 +69,7 @@ impl Resolver {
 }
 
 impl Sink for Resolver {
-    type SinkItem = pmodels::Query;
+    type SinkItem = Query;
     type SinkError = Error;
 
     fn start_send(&mut self, query: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
@@ -77,7 +79,7 @@ impl Sink for Resolver {
                     let host = query.host.clone();
                     let history = Arc::clone(&self.history);
                     move |&addr| {
-                        if let pmodels::Host::S(ref s) = host {
+                        if let Host::S(ref s) = host {
                             history.lock().unwrap().insert(addr.clone(), s.host.clone());
                         }
                     }

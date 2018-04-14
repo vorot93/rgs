@@ -13,6 +13,39 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 
+#[derive(Clone, Debug)]
+pub struct ServerEntry {
+    pub protocol: TProtocol,
+    pub data: Server,
+}
+
+impl std::hash::Hash for ServerEntry {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.data.addr.hash(state)
+    }
+}
+
+impl PartialEq for ServerEntry {
+    fn eq(&self, other: &ServerEntry) -> bool {
+        self.data.addr == other.data.addr
+    }
+}
+
+impl Eq for ServerEntry {}
+
+impl ServerEntry {
+    pub fn new(protocol: TProtocol, data: Server) -> ServerEntry {
+        ServerEntry {
+            protocol: protocol,
+            data: data,
+        }
+    }
+
+    pub fn into_inner(self) -> (TProtocol, Server) {
+        (self.protocol, self.data)
+    }
+}
+
 pub type Config = HashMap<String, Value>;
 
 #[derive(Clone, Debug)]
@@ -110,12 +143,14 @@ pub enum ParseResult {
     Output(Server),
 }
 
+pub type ProtocolResultStream = Box<Stream<Item = ParseResult, Error = Error> + Send>;
+
 /// Protocol defines a common way to communicate with queried servers of a single type.
 pub trait Protocol: std::fmt::Debug + Send + Sync {
     /// Creates a request packet. Can accept an optional state if there is any.
     fn make_request(&self, state: Option<Value>) -> Vec<u8>;
     /// Create a stream of parsed values out of incoming response.
-    fn parse_response(&self, p: Packet) -> Box<Stream<Item = ParseResult, Error = Error>>;
+    fn parse_response(&self, p: Packet) -> ProtocolResultStream;
 }
 
 #[derive(Clone, Debug)]

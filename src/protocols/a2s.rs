@@ -2,7 +2,7 @@ use futures::prelude::*;
 use serde_json::Value;
 
 use errors::Error;
-use protocols::models::{Packet, ParseResult, Protocol};
+use models::{Packet, ParseResult, Protocol, ProtocolResultStream};
 
 #[derive(Debug)]
 pub struct A2SProtocol {}
@@ -16,7 +16,7 @@ impl Protocol for A2SProtocol {
 
         out
     }
-    fn parse_response(&self, p: Packet) -> Box<Stream<Item = ParseResult, Error = Error>> {
+    fn parse_response(&self, p: Packet) -> ProtocolResultStream {
         unimplemented!()
     }
 }
