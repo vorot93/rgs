@@ -1,10 +1,8 @@
 use errors;
 use errors::Error;
-use models;
 use protocols::models as protocol_models;
 
 use handlebars;
-use serde_json;
 use std;
 
 pub fn make_request_packet(

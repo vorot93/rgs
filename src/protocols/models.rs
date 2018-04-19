@@ -1,24 +1,23 @@
-use futures;
-use iso_country;
-use serde;
-use serde_json;
-use std;
-
 use errors::Error;
 use futures::prelude::*;
+use iso_country;
 use iso_country::Country as CountryBase;
 use serde::de::{Deserializer, Visitor};
 use serde::*;
+use serde_json;
 use serde_json::Value;
+use std;
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 
-pub type Config = serde_json::Map<String, serde_json::Value>;
+pub type Config = HashMap<String, Value>;
 
 #[derive(Clone, Debug)]
 pub struct Packet {
-    pub addr: std::net::SocketAddr,
+    pub addr: SocketAddr,
     pub data: Vec<u8>,
 }
 
@@ -124,7 +123,7 @@ pub struct TProtocol {
     inner: Arc<Protocol>,
 }
 
-impl std::ops::Deref for TProtocol {
+impl Deref for TProtocol {
     type Target = Arc<Protocol>;
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -228,7 +227,7 @@ pub struct Server {
     pub country: Country,
 
     #[serde(default)]
-    pub rules: serde_json::Map<String, Value>,
+    pub rules: HashMap<String, Value>,
 
     // Optional fields
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -244,45 +243,45 @@ pub struct Server {
     pub game_type: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub terrain: Option<String>,
+    pub map: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub num_clients: Option<i64>,
+    pub num_clients: Option<u64>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_clients: Option<i64>,
+    pub max_clients: Option<u64>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub num_bots: Option<i64>,
+    pub num_bots: Option<u64>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secure: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ping: Option<i64>,
+    pub ping: Option<u64>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub players: Option<Vec<Player>>,
 }
 
 impl Server {
-    pub fn new(addr: std::net::SocketAddr) -> Server {
+    pub fn new(addr: SocketAddr) -> Server {
         Server {
-            addr: addr,
-            status: Status::default(),
-            country: Country::default(),
-            rules: serde_json::Map::default(),
-            name: Option::default(),
-            need_pass: Option::default(),
-            mod_name: Option::default(),
-            game_type: Option::default(),
-            terrain: Option::default(),
-            num_clients: Option::default(),
-            max_clients: Option::default(),
-            num_bots: Option::default(),
-            secure: Option::default(),
-            ping: Option::default(),
-            players: Option::default(),
+            addr,
+            status: Default::default(),
+            country: Default::default(),
+            rules: Default::default(),
+            name: Default::default(),
+            need_pass: Default::default(),
+            mod_name: Default::default(),
+            game_type: Default::default(),
+            map: Default::default(),
+            num_clients: Default::default(),
+            max_clients: Default::default(),
+            num_bots: Default::default(),
+            secure: Default::default(),
+            ping: Default::default(),
+            players: Default::default(),
         }
     }
 }

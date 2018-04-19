@@ -14,22 +14,18 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio_core::net::UdpSocket;
 
 fn main() {
-    // let server = ("master.openttd.org", 3978);
-    // let p = protocols::openttdm::P::default();
     let logger = librgs::util::RealLogger;
     let pconfig = librgs::protocols::make_default_protocols();
 
-    let requests = vec![
-        UserQuery {
-            protocol: pconfig.get("openttdm".into()).unwrap().clone(),
-            host: Host::S(
-                StringAddr {
-                    host: "master.openttd.org".into(),
-                    port: 3978,
-                }.into(),
-            ),
-        },
-    ];
+    let requests = vec![UserQuery {
+        protocol: pconfig.get("openttdm".into()).unwrap().clone(),
+        host: Host::S(
+            StringAddr {
+                host: "master.openttd.org".into(),
+                port: 3978,
+            }.into(),
+        ),
+    }];
 
     let query_builder = librgs::UdpQueryBuilder::default();
 

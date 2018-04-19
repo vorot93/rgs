@@ -5,6 +5,7 @@
 //! IP, server metadata, player list and more.
 
 extern crate byteorder;
+extern crate chrono;
 #[macro_use]
 extern crate enum_primitive_derive;
 #[macro_use]
@@ -13,6 +14,10 @@ extern crate futures;
 extern crate handlebars;
 extern crate iso_country;
 extern crate log;
+#[macro_use]
+extern crate maplit;
+#[macro_use]
+extern crate nom;
 extern crate num_traits;
 extern crate rand;
 extern crate resolve;

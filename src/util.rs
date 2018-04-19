@@ -1,9 +1,8 @@
-use byteorder;
 use std;
 
 use errors;
 
-use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
+use byteorder::{ByteOrder, ReadBytesExt};
 use errors::Error;
 use std::io::Cursor;
 

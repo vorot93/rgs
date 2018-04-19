@@ -1,9 +1,6 @@
-use failure;
 use futures;
 use std;
 use tokio_timer;
-
-use failure::Fail;
 
 #[derive(Debug, Fail)]
 pub enum Error {

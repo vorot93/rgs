@@ -1,19 +1,14 @@
-use errors;
 use errors::Error;
-use models;
 use util;
-use util::*;
 
-use byteorder::{LittleEndian, NetworkEndian};
+use byteorder::LittleEndian;
 use futures;
 use futures::prelude::*;
 use num_traits::FromPrimitive;
 use protocols::models as pmodels;
-use serde_json;
 use serde_json::Value;
-use std;
 use std::collections::VecDeque;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 /// Source: https://git.openttd.org/?p=trunk.git;a=blob;f=src/network/core/udp.h;hb=HEAD#l41
 #[derive(Clone, Debug, PartialEq, Primitive)]
@@ -247,7 +242,6 @@ impl pmodels::Protocol for Protocol {
 mod tests {
     use super::*;
 
-    use std::collections::HashSet;
     use std::str::FromStr;
 
     fn fixtures() -> (Vec<u8>, Vec<SocketAddr>) {
