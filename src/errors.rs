@@ -1,6 +1,6 @@
 use futures;
 use std;
-use tokio_timer;
+use std::io;
 
 #[derive(Debug, Fail)]
 pub enum Error {
@@ -28,9 +28,9 @@ impl<T: 'static> From<futures::sync::mpsc::SendError<T>> for Error {
     }
 }
 
-impl<T: std::fmt::Display + 'static> From<tokio_timer::DeadlineError<T>> for Error {
-    fn from(v: tokio_timer::DeadlineError<T>) -> Self {
-        Error::TimeoutError {
+impl From<io::Error> for Error {
+    fn from(v: io::Error) -> Self {
+        Error::IOError {
             reason: v.to_string(),
         }
     }

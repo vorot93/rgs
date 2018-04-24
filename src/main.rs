@@ -1,12 +1,13 @@
 extern crate futures;
+extern crate futures_timer;
 extern crate librgs;
 extern crate rand;
 extern crate resolve;
 extern crate serde_json;
 extern crate tokio_core;
-extern crate tokio_timer;
 
 use futures::prelude::*;
+use futures_timer::FutureExt;
 use librgs::errors::Error;
 use librgs::protocols::models::*;
 use librgs::util::LoggingService;
@@ -46,7 +47,7 @@ fn main() {
 
     println!("Starting core");
 
-    core.run(tokio_timer::Deadline::new(
+    core.run(
         futures::future::join_all(vec![
             Box::new(request_fut) as Box<Future<Item = (), Error = Error>>,
             Box::new(
@@ -56,7 +57,6 @@ fn main() {
                     })
                     .for_each(|_| Ok(())),
             ),
-        ]),
-        std::time::Instant::now() + timeout,
-    )).unwrap();
+        ]).timeout(timeout),
+    );
 }
