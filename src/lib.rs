@@ -20,6 +20,7 @@ extern crate maplit;
 extern crate nom;
 extern crate num_traits;
 extern crate openttd;
+extern crate q3a;
 extern crate rand;
 extern crate resolve;
 extern crate serde;
@@ -214,8 +215,7 @@ impl UdpQuery {
         let dns_resolver_stream = dns_resolver_stream.map({
             let protocol_mapping = protocol_mapping.clone();
             move |v| {
-                let mut data = v.protocol.make_request(v.state);
-                println!("{} {:?}", v.addr, &data);
+                let data = v.protocol.make_request(v.state);
                 protocol_mapping
                     .lock()
                     .unwrap()

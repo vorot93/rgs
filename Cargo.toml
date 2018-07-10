@@ -35,6 +35,7 @@ maplit = "*"
 nom = "*"
 num-traits = "*"
 openttd = { git = "https://github.com/rust-game-parsers/openttd" }
+q3a = { git = "https://github.com/rust-game-parsers/q3a" }
 rand = "*"
 resolve = "*"
 serde = "*"
