@@ -22,7 +22,7 @@ extern crate resolve;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-#[macro_use]
+#[cfg_attr(test, macro_use)]
 extern crate serde_json;
 extern crate tokio;
 extern crate tokio_codec;

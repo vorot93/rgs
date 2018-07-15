@@ -62,8 +62,14 @@ pub struct StringAddr {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Host {
-    A(std::net::SocketAddr),
+    A(SocketAddr),
     S(StringAddr),
+}
+
+impl From<SocketAddr> for Host {
+    fn from(addr: SocketAddr) -> Self {
+        Host::A(addr)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -146,7 +152,7 @@ pub enum ParseResult {
 pub type ProtocolResultStream = Box<Stream<Item = ParseResult, Error = failure::Error> + Send>;
 
 /// Protocol defines a common way to communicate with queried servers of a single type.
-pub trait Protocol: std::fmt::Debug + Send + Sync {
+pub trait Protocol: std::fmt::Debug + Send + Sync + 'static {
     /// Creates a request packet. Can accept an optional state if there is any.
     fn make_request(&self, state: Option<Value>) -> Vec<u8>;
     /// Create a stream of parsed values out of incoming response.
@@ -171,8 +177,8 @@ impl PartialEq for TProtocol {
     }
 }
 
-impl From<Arc<Protocol + 'static>> for TProtocol {
-    fn from(v: Arc<Protocol + 'static>) -> TProtocol {
+impl From<Arc<Protocol>> for TProtocol {
+    fn from(v: Arc<Protocol>) -> TProtocol {
         Self { inner: v }
     }
 }

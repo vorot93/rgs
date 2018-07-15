@@ -45,17 +45,15 @@ fn parse_q3a_server(
 
 /// Quake III Arena server protocol implementation
 #[derive(Debug)]
-pub struct Q3SProtocol {
-    pub protocol_ver: u8,
-    pub default_request_port: u16,
+pub struct ProtocolImpl {
+    pub version: u8,
     pub rule_names: HashMap<Rule, String>,
 }
 
-impl Default for Q3SProtocol {
+impl Default for ProtocolImpl {
     fn default() -> Self {
         Self {
-            protocol_ver: 68,
-            default_request_port: 27950,
+            version: 68,
             rule_names: hashmap! {
                 Rule::Secure => "sv_punkbuster".into(),
                 Rule::MaxClients => "sv_maxclients".into(),
@@ -69,29 +67,31 @@ impl Default for Q3SProtocol {
     }
 }
 
-impl Protocol for Q3SProtocol {
+impl Protocol for ProtocolImpl {
     fn make_request(&self, _state: Option<Value>) -> Vec<u8> {
+        let mut out = Vec::new();
         q3a::Packet::GetStatus(q3a::GetStatusData {
             challenge: "RGS".into(),
-        }).to_bytes()
+        }).write_bytes(&mut out)
+            .unwrap();
+        out
     }
 
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
         Box::new(futures::stream::iter_result(vec![
             q3a::Packet::from_bytes(p.data.as_slice().into())
                 .map_err(|e| format_err!("{}", e))
-                .and_then(|v| {
-                    if let q3a::Packet::InfoResponse(pkt) = v.1 {
+                .and_then(|(_, pkt)| match pkt {
+                    q3a::Packet::InfoResponse(pkt) => {
                         let mut server = Server::new(p.addr);
 
                         parse_q3a_server(&mut server, pkt, self.rule_names.clone())?;
 
                         Ok(ParseResult::Output(server))
-                    } else {
-                        Err(format_err!("Wrong packet type")
-                            .context(Error::DataParseError)
-                            .into())
                     }
+                    other => Err(format_err!("Wrong packet type: {:?}", other.get_type())
+                        .context(Error::DataParseError)
+                        .into()),
                 }),
         ]))
     }
@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn test_parse_server() {
         let addr = "77.93.223.201:27960".parse().unwrap();
-        let fixture = Packet {
+        let _fixture = Packet {
             addr,
             data: include_bytes!("test_payload/q3s_response.raw").to_vec(),
         };
