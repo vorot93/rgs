@@ -1,15 +1,10 @@
-use errors;
-use errors::Error;
+use failure;
 use models::*;
 
 use handlebars;
-use std;
 
-pub fn make_request_packet(template: &str, config: &Config) -> errors::Result<Vec<u8>> {
+pub fn make_request_packet(template: &str, config: &Config) -> Result<Vec<u8>, failure::Error> {
     Ok(handlebars::Handlebars::new()
-        .render_template(template, config)
-        .map_err(|e| Error::IOError {
-            reason: std::error::Error::description(&e).into(),
-        })?
+        .render_template(template, config)?
         .into_bytes())
 }

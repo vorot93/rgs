@@ -1,93 +1,93 @@
-use errors;
 use errors::Error;
 use models::*;
-use util;
-use util::*;
 
-use byteorder::NetworkEndian;
-use chrono::prelude::*;
+use failure;
 use futures;
-use futures::prelude::*;
 use openttd;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 
 fn write_v2_data(srv: &mut Server, v: openttd::V2Data) {
     srv.rules
-        .insert("max-companies".into(), json!(v.max_companies));
+        .insert("max-companies".into(), v.max_companies.into());
     srv.rules
-        .insert("current-companies".into(), json!(v.current_companies));
+        .insert("current-companies".into(), v.current_companies.into());
     srv.rules
-        .insert("max-spectators".into(), json!(v.max_spectators));
+        .insert("max-spectators".into(), v.max_spectators.into());
 }
 
 fn write_v3_data(srv: &mut Server, v: openttd::V3Data) {
     srv.rules
-        .insert("current-time".into(), json!(v.game_date.timestamp()));
+        .insert("current-time".into(), v.game_date.timestamp().into());
     srv.rules
-        .insert("start-time".into(), json!(v.start_date.timestamp()));
+        .insert("start-time".into(), v.start_date.timestamp().into());
 }
 
 fn write_v4_data(srv: &mut Server, v: openttd::V4Data) {
-    srv.rules
-        .insert("active-newgrf".into(), json!(v.active_newgrf));
+    srv.rules.insert(
+        "active-newgrf".into(),
+        Value::Object(
+            v.active_newgrf
+                .into_iter()
+                .map(|(id, hash)| (id.to_string(), hash.to_string().into()))
+                .collect(),
+        ),
+    );
 }
 
-impl From<(SocketAddr, openttd::ServerResponse)> for Server {
-    fn from(v: (SocketAddr, openttd::ServerResponse)) -> Self {
-        let (addr, info) = v;
-        let mut srv = Server::new(addr);
-        srv.status = Status::Up;
+fn parse_server(addr: SocketAddr, info: openttd::ServerResponse) -> Result<Server, failure::Error> {
+    let mut srv = Server::new(addr);
+    srv.status = Status::Up;
 
-        srv.name = Some(String::from_utf8_lossy(&info.server_name.into_bytes()).into_owned());
-        srv.need_pass = Some(info.use_password);
-        srv.map = Some(String::from_utf8_lossy(&info.map_name.into_bytes()).into_owned());
-        srv.num_clients = Some(info.clients_on as u64);
-        srv.max_clients = Some(info.clients_max as u64);
+    srv.name = Some(String::from_utf8_lossy(&info.server_name.into_bytes()).into_owned());
+    srv.need_pass = Some(info.use_password);
+    srv.map = Some(String::from_utf8_lossy(&info.map_name.into_bytes()).into_owned());
+    srv.num_clients = Some(info.clients_on as u64);
+    srv.max_clients = Some(info.clients_max as u64);
 
-        srv.rules.insert(
-            "protocol-version".into(),
-            json!(u8::from(&info.protocol_ver)),
-        );
+    srv.rules.insert(
+        "protocol-version".into(),
+        u8::from(&info.protocol_ver).into(),
+    );
 
-        match info.protocol_ver {
-            openttd::ProtocolVer::V1 => {}
-            openttd::ProtocolVer::V2(v2) => {
-                write_v2_data(&mut srv, v2);
-            }
-            openttd::ProtocolVer::V3(v2, v3) => {
-                write_v2_data(&mut srv, v2);
-                write_v3_data(&mut srv, v3);
-            }
-            openttd::ProtocolVer::V4(v2, v3, v4) => {
-                write_v2_data(&mut srv, v2);
-                write_v3_data(&mut srv, v3);
-                write_v4_data(&mut srv, v4);
-            }
+    match info.protocol_ver {
+        openttd::ProtocolVer::V1 => {}
+        openttd::ProtocolVer::V2(v2) => {
+            write_v2_data(&mut srv, v2);
         }
-
-        srv.rules
-            .insert("server-version".into(), json!(info.server_revision));
-        srv.rules
-            .insert("language-id".into(), json!(info.server_lang));
-        srv.rules
-            .insert("current-spectators".into(), json!(info.spectators_on));
-        srv.rules.insert("map-set".into(), json!(info.map_set));
-        srv.rules.insert("dedicated".into(), json!(info.dedicated));
-
-        srv
+        openttd::ProtocolVer::V3(v2, v3) => {
+            write_v2_data(&mut srv, v2);
+            write_v3_data(&mut srv, v3);
+        }
+        openttd::ProtocolVer::V4(v2, v3, v4) => {
+            write_v2_data(&mut srv, v2);
+            write_v3_data(&mut srv, v3);
+            write_v4_data(&mut srv, v4);
+        }
     }
+
+    srv.rules.insert(
+        "server-version".into(),
+        info.server_revision.into_string()?.into(),
+    );
+    srv.rules
+        .insert("language-id".into(), info.server_lang.into());
+    srv.rules
+        .insert("current-spectators".into(), info.spectators_on.into());
+    srv.rules.insert("map-set".into(), info.map_set.into());
+    srv.rules.insert("dedicated".into(), info.dedicated.into());
+
+    Ok(srv)
 }
 
-fn parse_data(addr: SocketAddr, buf: &[u8]) -> Result<Server, Error> {
-    let p = openttd::Packet::from_incoming_bytes(buf)?.1;
+fn parse_data(addr: SocketAddr, buf: &[u8]) -> Result<Server, failure::Error> {
+    let p = openttd::Packet::from_incoming_bytes(buf)
+        .map_err(|e| format_err!("{}", e))?
+        .1;
 
     match p {
-        openttd::Packet::ServerResponse(info) => Ok(Server::from((addr, info))),
-        _ => Err(Error::DataParseError {
-            reason: format!("invalid packet type: {:?}", p.pkt_type()),
-        }),
+        openttd::Packet::ServerResponse(info) => parse_server(addr, info),
+        _ => Err(format_err!("invalid packet type: {:?}", p.pkt_type())),
     }
 }
 
@@ -102,7 +102,9 @@ impl Protocol for ProtocolImpl {
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
         let Packet { data, addr } = p;
         Box::new(futures::stream::iter_result(vec![
-            parse_data(addr, &data).map(ParseResult::Output),
+            parse_data(addr, &data)
+                .map(ParseResult::Output)
+                .map_err(|e| e.context(Error::DataParseError).into()),
         ]))
     }
 }
@@ -112,8 +114,9 @@ mod tests {
     extern crate serde_json;
 
     use super::*;
-    use Protocol;
+    use futures::prelude::*;
     use std::str::FromStr;
+    use Protocol;
     fn fixtures() -> (SocketAddr, Vec<u8>, Server) {
         let addr = SocketAddr::from_str("127.0.0.1:9000").unwrap();
         let data = vec![
@@ -138,14 +141,14 @@ mod tests {
         srv.rules.insert("protocol-version".into(), json!(4));
         srv.rules.insert(
             "active-newgrf".into(),
-            json!({
-                "4d470305": "2e96b9ab2bea686bff94961ad433a701",
-                "32323322": "316180da1ba6444a06cd17f8fa79d60a",
-                "444e0700": "48b3f9e4fd0df2a72b5f44d3c8a2f4a0",
+            json!(hashmap! {
+                478788 => "48b3f9e4fd0df2a72b5f44d3c8a2f4a0",
+                84100941 => "2e96b9ab2bea686bff94961ad433a701",
+                573780530 => "316180da1ba6444a06cd17f8fa79d60a",
             }),
         );
-        srv.rules.insert("current-time".into(), 1676413440.into());
-        srv.rules.insert("start-time".into(), 1676413440.into());
+        srv.rules.insert("current-time".into(), 715875.into());
+        srv.rules.insert("start-time".into(), 715875.into());
         srv.rules.insert("max-companies".into(), 15.into());
         srv.rules.insert("current-companies".into(), 0.into());
         srv.rules.insert("server-version".into(), "1.5.3".into());
@@ -160,8 +163,6 @@ mod tests {
 
     #[test]
     fn test_p_make_request() {
-        let fixture = json!({});
-
         let expectation = vec![3, 0, 0];
         let result = ProtocolImpl.make_request(None);
 
@@ -182,6 +183,6 @@ mod tests {
             .map(|res| res.unwrap())
             .collect::<Vec<ParseResult>>();
 
-        assert_eq!(result, expectation);
+        assert_eq!(expectation, result);
     }
 }

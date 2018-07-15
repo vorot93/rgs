@@ -7,8 +7,6 @@
 extern crate byteorder;
 extern crate chrono;
 #[macro_use]
-extern crate enum_primitive_derive;
-#[macro_use]
 extern crate failure;
 extern crate futures;
 extern crate handlebars;
@@ -16,8 +14,6 @@ extern crate iso_country;
 extern crate log;
 #[macro_use]
 extern crate maplit;
-#[macro_use]
-extern crate nom;
 extern crate num_traits;
 extern crate openttd;
 extern crate q3a;
@@ -29,10 +25,11 @@ extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
 extern crate tokio;
+extern crate tokio_codec;
 extern crate tokio_dns;
 extern crate tokio_io;
 
-use errors::Error;
+use failure::Fail;
 use futures::prelude::*;
 use futures::sync::mpsc::Sender;
 use std::collections::HashMap;
@@ -40,8 +37,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::net::{UdpFramed, UdpSocket};
-use tokio::prelude::*;
-use tokio_io::codec::BytesCodec;
+use tokio_codec::BytesCodec;
 
 pub mod dns;
 #[macro_use]
@@ -57,11 +53,11 @@ type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, TProtocol>>>;
 pub enum FullParseResult {
     FollowUp(Query),
     Output(ServerEntry),
-    Error(Error),
+    Error(failure::Error),
 }
 
 struct ParseMuxer {
-    results_stream: Option<Box<Stream<Item = FullParseResult, Error = Error> + Send>>,
+    results_stream: Option<Box<Stream<Item = FullParseResult, Error = failure::Error> + Send>>,
 }
 
 impl ParseMuxer {
@@ -73,8 +69,8 @@ impl ParseMuxer {
 }
 
 impl Sink for ParseMuxer {
-    type SinkItem = Result<IncomingPacket, Error>;
-    type SinkError = Error;
+    type SinkItem = Result<IncomingPacket, failure::Error>;
+    type SinkError = failure::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         let mut results_stream = self.results_stream.take().unwrap();
@@ -120,7 +116,7 @@ impl Sink for ParseMuxer {
 
 impl Stream for ParseMuxer {
     type Item = FullParseResult;
-    type Error = Error;
+    type Error = failure::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         self.results_stream.as_mut().unwrap().poll()
@@ -147,11 +143,11 @@ impl From<IncomingPacket> for (TProtocol, Packet) {
 
 /// Represents a single request by user to query the servers fed into sink.
 pub struct UdpQuery {
-    query_to_dns: Box<Future<Item = (), Error = Error> + Send>,
-    dns_to_socket: Box<Future<Item = (), Error = Error> + Send>,
-    socket_to_parser: Box<Future<Item = (), Error = Error> + Send>,
+    query_to_dns: Box<Future<Item = (), Error = failure::Error> + Send>,
+    dns_to_socket: Box<Future<Item = (), Error = failure::Error> + Send>,
+    socket_to_parser: Box<Future<Item = (), Error = failure::Error> + Send>,
 
-    parser_stream: Box<Stream<Item = FullParseResult, Error = Error> + Send>,
+    parser_stream: Box<Stream<Item = FullParseResult, Error = failure::Error> + Send>,
     input_sink: Sender<Query>,
     follow_up_sink: Sender<Query>,
 }
@@ -166,42 +162,38 @@ impl UdpQuery {
 
         let (socket_sink, socket_stream) = UdpFramed::new(socket, BytesCodec::new()).split();
 
-        let socket_stream = socket_stream.map({
-            let protocol_mapping = protocol_mapping.clone();
-            move |(buf, addr)| {
-                let protocol = protocol_mapping
-                    .lock()
-                    .unwrap()
-                    .get(&addr)
-                    .ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Could not determine server's protocol",
-                        )
-                    })?
-                    .clone();
-                Ok(IncomingPacket {
-                    protocol,
-                    addr: addr,
-                    data: buf.to_vec(),
-                })
-            }
-        });
+        let socket_stream = socket_stream
+            .map({
+                let protocol_mapping = protocol_mapping.clone();
+                move |(buf, addr)| {
+                    let protocol = protocol_mapping
+                        .lock()
+                        .unwrap()
+                        .get(&addr)
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "Could not determine server's protocol",
+                            )
+                        })?
+                        .clone();
+                    Ok(IncomingPacket {
+                        protocol,
+                        addr: addr,
+                        data: buf.to_vec(),
+                    })
+                }
+            })
+            .map_err(|e| failure::Error::from(e));
 
-        let socket_sink = socket_sink.sink_map_err(|e| errors::Error::IOError {
-            reason: format!("socket_sink error: {}", std::error::Error::description(&e)),
-        });
-        let socket_stream = socket_stream.map_err(|e| errors::Error::IOError {
-            reason: format!(
-                "socket_stream error: {}",
-                std::error::Error::description(&e)
-            ),
-        });
+        let socket_sink =
+            socket_sink.sink_map_err(|e| failure::Error::from(e.context("Socket sink error")));
+        let socket_stream =
+            socket_stream.map_err(|e| failure::Error::from(e.context("Socket stream error")));
 
         let (query_sink, query_stream) = futures::sync::mpsc::channel::<Query>(1);
-        let query_stream = Box::new(query_stream.map_err(|_| Error::NetworkError {
-            reason: "Query stream returned an error".into(),
-        }));
+        let query_stream =
+            Box::new(query_stream.map_err(|_| format_err!("Query stream returned an error")));
 
         let (input_sink, follow_up_sink) = (query_sink.clone(), query_sink.clone());
 
@@ -209,7 +201,9 @@ impl UdpQuery {
         let dns_resolver = dns::Resolver::new(dns_resolver, dns_history.clone());
 
         let (parser_sink, parser_stream) = parser.split();
-        let parser_stream = Box::new(parser_stream);
+        let parser_stream = Box::new(
+            parser_stream.map_err(|e| failure::Error::from(e.context("Parser stream error"))),
+        );
         let (dns_resolver_sink, dns_resolver_stream) = dns_resolver.split();
 
         let dns_resolver_stream = dns_resolver_stream.map({
@@ -245,7 +239,7 @@ impl UdpQuery {
 
 impl Sink for UdpQuery {
     type SinkItem = UserQuery;
-    type SinkError = Error;
+    type SinkError = failure::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         Ok(self.input_sink.start_send(item.into())?.map(|v| v.into()))
@@ -262,7 +256,7 @@ impl Sink for UdpQuery {
 
 impl Stream for UdpQuery {
     type Item = ServerEntry;
-    type Error = Error;
+    type Error = failure::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         self.query_to_dns.poll()?;

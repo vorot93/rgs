@@ -3,11 +3,9 @@ use models::{Packet, ParseResult, Protocol, ProtocolResultStream, Server};
 
 use failure;
 use futures;
-use futures::prelude::*;
 use q3a;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Rule {
@@ -20,20 +18,29 @@ pub enum Rule {
     ServerName,
 }
 
-fn parse_q3a_server(pkt: q3a::Packet, rules: HashMap<Rule, String>) -> Result<Server, failure::Error> {
+fn parse_q3a_server(
+    srv: &mut Server,
+    pkt: q3a::InfoResponseData,
+    rule_mapping: HashMap<Rule, String>,
+) -> Result<(), failure::Error> {
+    use self::Rule::*;
 
-}
+    let mut rules = pkt.info;
 
-fn parse_data(
-    response_prelude: Vec<u8>,
-    buf: Vec<u8>,
-    addr: SocketAddr,
-) -> Result<Server, Error> {
-    let pkt = q3a::Packet::from_bytes(buf.as_slice().into());
+    if let Some(rule) = rule_mapping.get(&ServerName) {
+        srv.name = rules.remove(rule);
+    }
 
-    let mut server = Server::new(addr);
+    if let Some(rule) = rule_mapping.get(&Secure) {
+        srv.secure = rules.remove(rule).map(|v| v == "1");
+    }
 
-    Ok(server)
+    srv.rules = rules
+        .into_iter()
+        .map(|(k, v)| (k, Value::String(v)))
+        .collect();
+
+    Ok(())
 }
 
 /// Quake III Arena server protocol implementation
@@ -71,12 +78,28 @@ impl Default for Q3SProtocol {
 
 impl Protocol for Q3SProtocol {
     fn make_request(&self, _state: Option<Value>) -> Vec<u8> {
-        q3a::Packet::GetStatus(q3a::GetStatusData { challenge: "RGS".into() }).to_bytes()
+        q3a::Packet::GetStatus(q3a::GetStatusData {
+            challenge: "RGS".into(),
+        }).to_bytes()
     }
 
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
         Box::new(futures::stream::iter_result(vec![
-            parse_data(self.response_prelude.clone(), p.data, p.addr).map(ParseResult::Output),
+            q3a::Packet::from_bytes(p.data.as_slice().into())
+                .map_err(|e| format_err!("{}", e))
+                .and_then(|v| {
+                    if let q3a::Packet::InfoResponse(pkt) = v.1 {
+                        let mut server = Server::new(p.addr);
+
+                        parse_q3a_server(&mut server, pkt, self.rule_names.clone())?;
+
+                        Ok(ParseResult::Output(server))
+                    } else {
+                        Err(format_err!("Wrong packet type")
+                            .context(Error::DataParseError)
+                            .into())
+                    }
+                }),
         ]))
     }
 }

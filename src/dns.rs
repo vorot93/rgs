@@ -1,12 +1,11 @@
-use errors;
 use errors::Error;
 use models::*;
 
+use failure;
 use futures;
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;
 use serde_json::Value;
-use std;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -15,22 +14,22 @@ use tokio_dns;
 pub fn resolve_host(
     resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
     host: Host,
-) -> Box<Future<Item = SocketAddr, Error = errors::Error> + Send> {
+) -> Box<Future<Item = SocketAddr, Error = failure::Error> + Send> {
     match host {
         Host::A(addr) => Box::new(futures::future::ok(addr)),
         Host::S(stringaddr) => Box::new(
             resolver
                 .resolve(&stringaddr.host)
-                .map_err(|e| Error::NetworkError {
-                    reason: std::error::Error::description(&e).into(),
-                })
+                .map_err(|e| e.into())
                 .and_then(move |addrs| {
                     addrs
                         .into_iter()
                         .next()
                         .map(|ipaddr| SocketAddr::new(ipaddr, stringaddr.port))
-                        .ok_or_else(|| Error::NetworkError {
-                            reason: format!("Failed to resolve host {}", &stringaddr.host),
+                        .ok_or_else(|| {
+                            format_err!("Failed to resolve host {}", &stringaddr.host)
+                                .context(Error::NetworkError)
+                                .into()
                         })
                 }),
         ),
@@ -49,7 +48,7 @@ pub struct Resolver {
     inner: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
     history: History,
     pending_requests:
-        FuturesUnordered<Box<Future<Item = Option<ResolvedQuery>, Error = Error> + Send>>,
+        FuturesUnordered<Box<Future<Item = Option<ResolvedQuery>, Error = failure::Error> + Send>>,
 }
 
 impl Resolver {
@@ -59,7 +58,7 @@ impl Resolver {
     ) -> Self {
         let mut pending_requests = FuturesUnordered::new();
         pending_requests.push(Box::new(futures::future::empty())
-            as Box<Future<Item = Option<ResolvedQuery>, Error = Error> + Send>);
+            as Box<Future<Item = Option<ResolvedQuery>, Error = failure::Error> + Send>);
         Self {
             inner: resolver,
             history,
@@ -70,7 +69,7 @@ impl Resolver {
 
 impl Sink for Resolver {
     type SinkItem = Query;
-    type SinkError = Error;
+    type SinkError = failure::Error;
 
     fn start_send(&mut self, query: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         self.pending_requests.push(Box::new(
@@ -91,7 +90,7 @@ impl Sink for Resolver {
                         state: query.state,
                     })
                 })
-                .or_else(|e| Ok(None)),
+                .or_else(|_e| Ok(None)),
         ));
         Ok(AsyncSink::Ready)
     }
@@ -107,7 +106,7 @@ impl Sink for Resolver {
 
 impl Stream for Resolver {
     type Item = ResolvedQuery;
-    type Error = Error;
+    type Error = failure::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         if let Async::Ready(Some(result)) = self.pending_requests.poll()? {

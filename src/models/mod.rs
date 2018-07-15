@@ -1,4 +1,4 @@
-use errors::Error;
+use failure;
 use futures::prelude::*;
 use iso_country;
 use iso_country::Country as CountryBase;
@@ -7,7 +7,7 @@ use serde::*;
 use serde_json;
 use serde_json::Value;
 use std;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -143,7 +143,7 @@ pub enum ParseResult {
     Output(Server),
 }
 
-pub type ProtocolResultStream = Box<Stream<Item = ParseResult, Error = Error> + Send>;
+pub type ProtocolResultStream = Box<Stream<Item = ParseResult, Error = failure::Error> + Send>;
 
 /// Protocol defines a common way to communicate with queried servers of a single type.
 pub trait Protocol: std::fmt::Debug + Send + Sync {
@@ -262,7 +262,7 @@ pub struct Server {
     pub country: Country,
 
     #[serde(default)]
-    pub rules: HashMap<String, Value>,
+    pub rules: BTreeMap<String, Value>,
 
     // Optional fields
     #[serde(skip_serializing_if = "Option::is_none")]
