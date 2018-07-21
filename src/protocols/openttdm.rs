@@ -1,14 +1,13 @@
-use errors::Error;
+use errors::{Error, Result};
 use models::*;
 
-use failure;
 use futures;
 use openttd;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 
-fn parse_data(buf: &[u8]) -> Result<HashSet<SocketAddr>, failure::Error> {
+fn parse_data(buf: &[u8]) -> Result<HashSet<SocketAddr>> {
     let p = openttd::Packet::from_incoming_bytes(buf)
         .map_err(|e| format_err!("Nom failure while parsing: {}", e))?
         .1;

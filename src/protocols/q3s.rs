@@ -1,7 +1,6 @@
-use errors::Error;
+use errors::{Error, Result};
 use models::{Packet, ParseResult, Protocol, ProtocolResultStream, Server};
 
-use failure;
 use futures;
 use q3a;
 use serde_json::Value;
@@ -22,7 +21,7 @@ fn parse_q3a_server(
     srv: &mut Server,
     pkt: q3a::InfoResponseData,
     rule_mapping: HashMap<Rule, String>,
-) -> Result<(), failure::Error> {
+) -> Result<()> {
     use self::Rule::*;
 
     let mut rules = pkt.info;

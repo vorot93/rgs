@@ -1,3 +1,6 @@
+use failure;
+use std;
+
 #[derive(Debug, Fail)]
 pub enum Error {
     #[fail(display = "Null error")]
@@ -13,3 +16,5 @@ pub enum Error {
     #[fail(display = "Operation timed out")]
     TimeoutError,
 }
+
+pub type Result<T> = std::result::Result<T, failure::Error>;

@@ -48,6 +48,8 @@ pub mod protocols;
 #[macro_use]
 pub mod util;
 
+use errors::Result;
+
 type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, TProtocol>>>;
 
 pub enum FullParseResult {
@@ -69,7 +71,7 @@ impl ParseMuxer {
 }
 
 impl Sink for ParseMuxer {
-    type SinkItem = Result<IncomingPacket, failure::Error>;
+    type SinkItem = Result<IncomingPacket>;
     type SinkError = failure::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
