@@ -2,6 +2,8 @@ extern crate failure;
 extern crate futures;
 extern crate futures_timer;
 extern crate librgs;
+#[macro_use]
+extern crate log;
 extern crate rand;
 extern crate resolve;
 extern crate serde_json;
@@ -10,23 +12,33 @@ extern crate tokio;
 use futures::prelude::*;
 use futures_timer::FutureExt;
 use librgs::models::*;
-use librgs::util::LoggingService;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::{Arc, Mutex};
 use tokio::net::UdpSocket;
 
 fn main() {
-    let logger = librgs::util::RealLogger;
     let pconfig = librgs::protocols::make_default_protocols();
 
-    let requests = vec![UserQuery {
-        protocol: pconfig.get("openttdm".into()).unwrap().clone(),
-        host: Host::S(
-            StringAddr {
-                host: "master.openttd.org".into(),
-                port: 3978,
-            }.into(),
-        ),
-    }];
+    let requests = vec![
+        UserQuery {
+            protocol: pconfig.get("openttdm".into()).unwrap().clone(),
+            host: Host::S(
+                StringAddr {
+                    host: "master.openttd.org".into(),
+                    port: 3978,
+                }.into(),
+            ),
+        },
+        UserQuery {
+            protocol: pconfig.get("q3m".into()).unwrap().clone(),
+            host: Host::S(
+                StringAddr {
+                    host: "master3.idsoftware.com".into(),
+                    port: 27950,
+                }.into(),
+            ),
+        },
+    ];
 
     let query_builder = librgs::UdpQueryBuilder::default();
 
@@ -39,20 +51,26 @@ fn main() {
     let request_stream = Box::new(futures::stream::iter_ok::<Vec<UserQuery>, failure::Error>(
         requests,
     )) as Box<Stream<Item = UserQuery, Error = failure::Error> + Send>;
-    let request_fut = Box::new(request_sink.send_all(request_stream).and_then(|_| {
-        println!("Sent all");
+    let request_fut = Box::new(request_sink.send_all(request_stream).and_then(move |_| {
+        debug!("Sent all");
         Ok(())
     })) as Box<Future<Item = (), Error = failure::Error> + Send>;
 
     let timeout = std::time::Duration::from_secs(10);
+
+    let total_queried = Arc::new(Mutex::new(0));
 
     let task = Box::new(
         futures::future::join_all(vec![
             request_fut as Box<Future<Item = (), Error = failure::Error> + Send>,
             Box::new(
                 server_stream
-                    .inspect(move |entry| {
-                        logger.info(&serde_json::to_string(&entry.clone().into_inner().1).unwrap());
+                    .inspect({
+                        let total_queried = total_queried.clone();
+                        move |entry| {
+                            debug!("{:?}", entry);
+                            *total_queried.lock().unwrap() += 1;
+                        }
                     })
                     .for_each(|_| Ok(())),
             ) as Box<Future<Item = (), Error = failure::Error> + Send>,
@@ -61,6 +79,7 @@ fn main() {
             .map_err(|_| ()),
     ) as Box<Future<Item = (), Error = ()> + Send>;
 
-    println!("Starting reactor");
+    debug!("Starting reactor");
     tokio::run(task);
+    debug!("Queried {} servers", total_queried.lock().unwrap());
 }

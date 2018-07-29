@@ -45,8 +45,6 @@ pub mod errors;
 pub mod models;
 pub use models::*;
 pub mod protocols;
-#[macro_use]
-pub mod util;
 
 use errors::Result;
 

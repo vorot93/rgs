@@ -23,7 +23,7 @@ pub fn make_default_protocols() -> HashMap<String, TProtocol> {
     }) as Arc<Protocol>);
     let q3m_proto = TProtocol::from(Arc::new(q3m::ProtocolImpl {
         q3s_protocol: Some(q3s_proto.clone()),
-        version: q3_ver,
+        version: q3_ver as u32,
     }) as Arc<Protocol>);
 
     out.insert("openttds".into(), openttds_proto.clone());
