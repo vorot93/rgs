@@ -2,6 +2,7 @@ use errors::{Error, Result};
 use models::{Packet, ParseResult, Protocol, ProtocolResultStream, Server};
 
 use futures;
+use futures::prelude::*;
 use q3a;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -77,22 +78,27 @@ impl Protocol for ProtocolImpl {
     }
 
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
-        Box::new(futures::stream::iter_result(vec![
-            q3a::Packet::from_bytes(p.data.as_slice().into())
-                .map_err(|e| format_err!("{}", e))
-                .and_then(|(_, pkt)| match pkt {
-                    q3a::Packet::InfoResponse(pkt) => {
-                        let mut server = Server::new(p.addr);
+        Box::new(
+            futures::stream::iter_result(vec![
+                q3a::Packet::from_bytes(p.data.as_slice().into())
+                    .map_err(|e| format_err!("{}", e))
+                    .and_then(|(_, pkt)| match pkt {
+                        q3a::Packet::InfoResponse(pkt) => {
+                            let mut server = Server::new(p.addr);
 
-                        parse_q3a_server(&mut server, pkt, self.rule_names.clone())?;
+                            parse_q3a_server(&mut server, pkt, self.rule_names.clone())?;
 
-                        Ok(ParseResult::Output(server))
-                    }
-                    other => Err(format_err!("Wrong packet type: {:?}", other.get_type())
-                        .context(Error::DataParseError)
-                        .into()),
-                }),
-        ]))
+                            Ok(ParseResult::Output(server))
+                        }
+                        other => Err(format_err!("Wrong packet type: {:?}", other.get_type())
+                            .context(Error::DataParseError)
+                            .into()),
+                    }),
+            ]).map_err({
+                let p = p.clone();
+                move |e| (Some(p.clone()), e)
+            }),
+        )
     }
 }
 

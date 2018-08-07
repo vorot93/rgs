@@ -149,7 +149,8 @@ pub enum ParseResult {
     Output(Server),
 }
 
-pub type ProtocolResultStream = Box<Stream<Item = ParseResult, Error = failure::Error> + Send>;
+pub type ProtocolResultStream =
+    Box<Stream<Item = ParseResult, Error = (Option<Packet>, failure::Error)> + Send>;
 
 /// Protocol defines a common way to communicate with queried servers of a single type.
 pub trait Protocol: std::fmt::Debug + Send + Sync + 'static {

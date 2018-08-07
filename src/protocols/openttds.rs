@@ -98,12 +98,11 @@ impl Protocol for ProtocolImpl {
         vec![3, 0, 0]
     }
 
-    fn parse_response(&self, p: Packet) -> ProtocolResultStream {
-        let Packet { data, addr } = p;
+    fn parse_response(&self, pkt: Packet) -> ProtocolResultStream {
         Box::new(futures::stream::iter_result(vec![
-            parse_data(addr, &data)
+            parse_data(pkt.addr, &pkt.data)
                 .map(ParseResult::Output)
-                .map_err(|e| e.context(Error::DataParseError).into()),
+                .map_err(|e| (Some(pkt), e.context(Error::DataParseError).into())),
         ]))
     }
 }
@@ -175,12 +174,13 @@ mod tests {
 
         let expectation = vec![ParseResult::Output(server)];
 
-        let result = p.parse_response(Packet {
-            addr: addr,
-            data: data,
-        }).wait()
-            .map(|res| res.unwrap())
-            .collect::<Vec<ParseResult>>();
+        let result =
+            p.parse_response(Packet {
+                addr: addr,
+                data: data,
+            }).wait()
+                .map(|res| res.unwrap())
+                .collect::<Vec<ParseResult>>();
 
         assert_eq!(expectation, result);
     }

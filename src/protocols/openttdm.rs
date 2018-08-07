@@ -39,11 +39,10 @@ impl Protocol for ProtocolImpl {
 
     fn parse_response(&self, pkt: Packet) -> ProtocolResultStream {
         if let Some(child) = self.child.clone() {
-            let data = pkt.data;
-
-            Box::new(futures::stream::iter_result(match parse_data(&data) {
-                Err(e) => vec![Err(e)],
-                Ok(data) => data.into_iter()
+            Box::new(futures::stream::iter_result(match parse_data(&pkt.data) {
+                Err(e) => vec![Err((Some(pkt), e))],
+                Ok(data) => data
+                    .into_iter()
                     .map(move |addr| {
                         Ok(ParseResult::FollowUp(FollowUpQuery {
                             host: Host::A(addr),

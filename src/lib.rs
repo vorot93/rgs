@@ -53,7 +53,7 @@ type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, TProtocol>>>;
 pub enum FullParseResult {
     FollowUp(Query),
     Output(ServerEntry),
-    Error(failure::Error),
+    Error((Option<Packet>, failure::Error)),
 }
 
 struct ParseMuxer {
@@ -80,7 +80,7 @@ impl Sink for ParseMuxer {
 
                 results_stream = Box::new(
                     results_stream.chain(
-                        Protocol::parse_response(&**protocol, pkt)
+                        Protocol::parse_response(&**protocol, pkt.clone())
                             .map(move |v| match v {
                                 ParseResult::FollowUp(q) => FullParseResult::FollowUp(
                                     (q, TProtocol::clone(&protocol)).into(),
@@ -90,14 +90,14 @@ impl Sink for ParseMuxer {
                                     data: s,
                                 }),
                             })
-                            .or_else(|e| Ok(FullParseResult::Error(e))),
+                            .or_else(move |(pkt, e)| Ok(FullParseResult::Error((pkt, e)))),
                     ),
                 );
             }
             Err(e) => {
-                results_stream = Box::new(
-                    results_stream.chain(futures::stream::iter_ok(vec![FullParseResult::Error(e)])),
-                )
+                results_stream = Box::new(results_stream.chain(futures::stream::iter_ok(vec![
+                    FullParseResult::Error((None, e)),
+                ])))
             }
         }
         self.results_stream = Some(results_stream);
@@ -273,7 +273,14 @@ impl Stream for UdpQuery {
                         return Ok(Async::Ready(Some(s)));
                     }
                     FullParseResult::Error(e) => {
-                        eprintln!("Parser returned error: {:?}", e);
+                        eprintln!(
+                            "Parser returned error. Addr: {:?}, Data: {:?}, Error: {:?}",
+                            e.0.clone().map(|e| e.addr),
+                            e.0
+                                .clone()
+                                .map(|e| String::from_utf8_lossy(&e.data).to_string()),
+                            e.1
+                        );
                     }
                 },
                 None => {
