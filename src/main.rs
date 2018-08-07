@@ -1,3 +1,4 @@
+extern crate env_logger;
 extern crate failure;
 extern crate futures;
 extern crate futures_timer;
@@ -9,14 +10,29 @@ extern crate resolve;
 extern crate serde_json;
 extern crate tokio;
 
+use env_logger::Builder as EnvLogBuilder;
 use futures::prelude::*;
 use futures_timer::FutureExt;
 use librgs::models::*;
+use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use tokio::net::UdpSocket;
 
+fn init_logging() {
+    let mut builder = EnvLogBuilder::new();
+    if let Ok(v) = env::var("RUST_LOG") {
+        builder.parse(&v);
+    }
+    let stdio_logger = builder.build();
+    let log_level = stdio_logger.filter();
+    log::set_max_level(log_level);
+    log::set_boxed_logger(Box::new(stdio_logger)).expect("Failed to install logger");
+}
+
 fn main() {
+    init_logging();
+
     let pconfig = librgs::protocols::make_default_protocols();
 
     let requests = vec![

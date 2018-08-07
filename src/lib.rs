@@ -11,6 +11,7 @@ extern crate failure;
 extern crate futures;
 extern crate handlebars;
 extern crate iso_country;
+#[macro_use]
 extern crate log;
 #[macro_use]
 extern crate maplit;
@@ -273,7 +274,7 @@ impl Stream for UdpQuery {
                         return Ok(Async::Ready(Some(s)));
                     }
                     FullParseResult::Error(e) => {
-                        eprintln!(
+                        debug!(
                             "Parser returned error. Addr: {:?}, Data: {:?}, Error: {:?}",
                             e.0.clone().map(|e| e.addr),
                             e.0
@@ -288,6 +289,8 @@ impl Stream for UdpQuery {
                 }
             }
         }
+
+        futures::task::current().notify();
 
         Ok(Async::NotReady)
     }
