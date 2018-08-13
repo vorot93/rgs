@@ -1,5 +1,5 @@
 use errors::{Error, Result};
-use models::{Packet, ParseResult, Protocol, ProtocolResultStream, Server};
+use models::{Packet, ParseResult, Player, Protocol, ProtocolResultStream, Server};
 
 use futures;
 use futures::prelude::*;
@@ -18,9 +18,21 @@ pub enum Rule {
     ServerName,
 }
 
+impl From<q3a::Player> for Player {
+    fn from(v: q3a::Player) -> Self {
+        Self {
+            name: v.name,
+            ping: Some(v.ping as i64),
+            info: vec![("score".to_string(), Value::Number(v.score.into()))]
+                .into_iter()
+                .collect(),
+        }
+    }
+}
+
 fn parse_q3a_server(
     srv: &mut Server,
-    pkt: q3a::InfoResponseData,
+    pkt: q3a::StatusResponseData,
     rule_mapping: HashMap<Rule, String>,
 ) -> Result<()> {
     use self::Rule::*;
@@ -31,9 +43,32 @@ fn parse_q3a_server(
         srv.name = rules.remove(rule);
     }
 
+    if let Some(rule) = rule_mapping.get(&Mod) {
+        srv.mod_name = rules.remove(rule);
+    }
+
+    if let Some(rule) = rule_mapping.get(&GameType) {
+        srv.game_type = rules.remove(rule);
+    }
+
+    if let Some(rule) = rule_mapping.get(&Map) {
+        srv.map = rules.remove(rule);
+    }
+
     if let Some(rule) = rule_mapping.get(&Secure) {
         srv.secure = rules.remove(rule).map(|v| v == "1");
     }
+
+    if let Some(rule) = rule_mapping.get(&NeedPass) {
+        srv.need_pass = rules.remove(rule).map(|v| v == "1");
+    }
+
+    if let Some(rule) = rule_mapping.get(&MaxClients) {
+        srv.max_clients = rules.remove(rule).and_then(|v| v.parse().ok())
+    }
+
+    srv.num_clients = Some(pkt.players.len() as u64);
+    srv.players = Some(pkt.players.into_iter().map(From::from).collect());
 
     srv.rules = rules
         .into_iter()
@@ -83,7 +118,7 @@ impl Protocol for ProtocolImpl {
                 q3a::Packet::from_bytes(p.data.as_slice().into())
                     .map_err(|e| format_err!("{}", e))
                     .and_then(|(_, pkt)| match pkt {
-                        q3a::Packet::InfoResponse(pkt) => {
+                        q3a::Packet::StatusResponse(pkt) => {
                             let mut server = Server::new(p.addr);
 
                             parse_q3a_server(&mut server, pkt, self.rule_names.clone())?;
@@ -99,19 +134,5 @@ impl Protocol for ProtocolImpl {
                 move |e| (Some(p.clone()), e)
             }),
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_server() {
-        let addr = "77.93.223.201:27960".parse().unwrap();
-        let _fixture = Packet {
-            addr,
-            data: include_bytes!("test_payload/q3s_response.raw").to_vec(),
-        };
     }
 }

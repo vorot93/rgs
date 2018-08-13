@@ -9,7 +9,6 @@ extern crate chrono;
 #[macro_use]
 extern crate failure;
 extern crate futures;
-extern crate handlebars;
 extern crate iso_country;
 #[macro_use]
 extern crate log;
@@ -32,7 +31,7 @@ extern crate tokio_io;
 
 use failure::Fail;
 use futures::prelude::*;
-use futures::sync::mpsc::Sender;
+use futures::sync::mpsc::UnboundedSender;
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
@@ -50,6 +49,18 @@ pub mod protocols;
 use errors::Result;
 
 type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, TProtocol>>>;
+
+fn to_v4(addr: SocketAddr) -> SocketAddr {
+    use SocketAddr::*;
+
+    if let V6(v) = addr {
+        if let Some(v4_addr) = v.ip().to_ipv4() {
+            return SocketAddr::from((v4_addr, v.port()));
+        }
+    }
+
+    return addr;
+}
 
 pub enum FullParseResult {
     FollowUp(Query),
@@ -149,8 +160,8 @@ pub struct UdpQuery {
     socket_to_parser: Box<Future<Item = (), Error = failure::Error> + Send>,
 
     parser_stream: Box<Stream<Item = FullParseResult, Error = failure::Error> + Send>,
-    input_sink: Sender<Query>,
-    follow_up_sink: Sender<Query>,
+    input_sink: UnboundedSender<Query>,
+    follow_up_sink: UnboundedSender<Query>,
 }
 
 impl UdpQuery {
@@ -166,7 +177,9 @@ impl UdpQuery {
         let socket_stream = socket_stream
             .map({
                 let protocol_mapping = protocol_mapping.clone();
-                move |(buf, addr)| {
+                move |(buf, mut addr)| {
+                    addr = to_v4(addr);
+                    trace!("Received data from {}: {:?}", addr, buf);
                     let protocol = protocol_mapping
                         .lock()
                         .unwrap()
@@ -174,13 +187,13 @@ impl UdpQuery {
                         .ok_or_else(|| {
                             io::Error::new(
                                 io::ErrorKind::InvalidData,
-                                "Could not determine server's protocol",
+                                format!("Could not determine protocol for {}", addr),
                             )
                         })?
                         .clone();
                     Ok(IncomingPacket {
                         protocol,
-                        addr: addr,
+                        addr,
                         data: buf.to_vec(),
                     })
                 }
@@ -192,7 +205,7 @@ impl UdpQuery {
         let socket_stream =
             socket_stream.map_err(|e| failure::Error::from(e.context("Socket stream error")));
 
-        let (query_sink, query_stream) = futures::sync::mpsc::channel::<Query>(1);
+        let (query_sink, query_stream) = futures::sync::mpsc::unbounded::<Query>();
         let query_stream =
             Box::new(query_stream.map_err(|_| format_err!("Query stream returned an error")));
 
@@ -211,10 +224,8 @@ impl UdpQuery {
             let protocol_mapping = protocol_mapping.clone();
             move |v| {
                 let data = v.protocol.make_request(v.state);
-                protocol_mapping
-                    .lock()
-                    .unwrap()
-                    .insert(v.addr.clone(), v.protocol);
+                trace!("Sending data to {}: {:?}", v.addr, data);
+                protocol_mapping.lock().unwrap().insert(v.addr, v.protocol);
                 (data.into(), v.addr)
             }
         });
@@ -260,6 +271,8 @@ impl Stream for UdpQuery {
     type Error = failure::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        debug!("Polled UdpQuery");
+
         self.query_to_dns.poll()?;
         self.dns_to_socket.poll()?;
         self.socket_to_parser.poll()?;
@@ -268,7 +281,7 @@ impl Stream for UdpQuery {
             match v {
                 Some(data) => match data {
                     FullParseResult::FollowUp(s) => {
-                        self.follow_up_sink.try_send(s).unwrap();
+                        self.follow_up_sink.unbounded_send(s).unwrap();
                     }
                     FullParseResult::Output(s) => {
                         return Ok(Async::Ready(Some(s)));
@@ -289,8 +302,6 @@ impl Stream for UdpQuery {
                 }
             }
         }
-
-        futures::task::current().notify();
 
         Ok(Async::NotReady)
     }
@@ -322,4 +333,17 @@ impl UdpQueryBuilder {
     pub fn build(&self, socket: UdpSocket) -> UdpQuery {
         UdpQuery::new(Arc::clone(&self.dns_resolver), socket)
     }
+}
+
+pub fn simple_udp_query(input: Vec<UserQuery>) -> UdpQuery {
+    let query_builder = UdpQueryBuilder::default();
+
+    let socket = UdpSocket::bind(&"[::]:5678".parse().unwrap()).unwrap();
+    let mut q = query_builder.build(socket);
+
+    for entry in input {
+        q.start_send(entry).unwrap();
+    }
+
+    q
 }
