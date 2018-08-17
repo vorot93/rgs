@@ -95,7 +95,7 @@ pub struct ProtocolImpl;
 
 impl Protocol for ProtocolImpl {
     fn make_request(&self, _state: Option<Value>) -> Vec<u8> {
-        vec![3, 0, 0]
+        openttd::Packet::ClientFindServer.to_bytes().unwrap()
     }
 
     fn parse_response(&self, pkt: Packet) -> ProtocolResultStream {
