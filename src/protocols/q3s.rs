@@ -25,7 +25,7 @@ impl From<q3a::Player> for Player {
     fn from(v: q3a::Player) -> Self {
         Self {
             name: v.name,
-            ping: Some(v.ping as i64),
+            ping: Some(i64::from(v.ping)),
             info: vec![("score".to_string(), Value::Number(v.score.into()))]
                 .into_iter()
                 .collect(),
@@ -36,7 +36,7 @@ impl From<q3a::Player> for Player {
 fn parse_q3a_server(
     srv: &mut Server,
     pkt: q3a::StatusResponseData,
-    rule_mapping: HashMap<Rule, String>,
+    rule_mapping: &HashMap<Rule, String>,
 ) -> Result<()> {
     use self::Rule::*;
 
@@ -118,7 +118,7 @@ impl Default for ProtocolImpl {
             ].into_iter()
                 .map(|(rule, name)| (*rule, name.to_string()))
                 .collect(),
-            server_filter: From::from(Arc::new(|srv| Some(srv)) as ServerFilterFunc),
+            server_filter: From::from(Arc::new(Some) as ServerFilterFunc),
         }
     }
 }
@@ -140,7 +140,7 @@ impl Protocol for ProtocolImpl {
                 q3a::Packet::StatusResponse(pkt) => {
                     let mut server = Server::new(p.addr);
 
-                    parse_q3a_server(&mut server, pkt, self.rule_names.clone())?;
+                    parse_q3a_server(&mut server, pkt, &self.rule_names)?;
 
                     Ok((self.server_filter.0)(server).map(ParseResult::Output))
                 }

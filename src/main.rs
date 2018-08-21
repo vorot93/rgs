@@ -35,7 +35,7 @@ fn main() {
 
     let requests = vec![
         UserQuery {
-            protocol: pconfig.get("openttdm".into()).unwrap().clone(),
+            protocol: pconfig.get("openttdm").unwrap().clone(),
             host: Host::S(
                 StringAddr {
                     host: "master.openttd.org".into(),
@@ -44,13 +44,11 @@ fn main() {
             ),
         },
         UserQuery {
-            protocol: pconfig.get("q3m".into()).unwrap().clone(),
-            host: Host::S(
-                StringAddr {
-                    host: "master3.idsoftware.com".into(),
-                    port: 27950,
-                }.into(),
-            ),
+            protocol: pconfig.get("q3m").unwrap().clone(),
+            host: Host::S(StringAddr {
+                host: "master3.idsoftware.com".into(),
+                port: 27950,
+            }),
         },
     ];
 

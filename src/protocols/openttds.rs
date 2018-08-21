@@ -41,8 +41,8 @@ fn parse_server(addr: SocketAddr, info: openttd::ServerResponse) -> Result<Serve
     srv.name = Some(String::from_utf8_lossy(&info.server_name.into_bytes()).into_owned());
     srv.need_pass = Some(info.use_password);
     srv.map = Some(String::from_utf8_lossy(&info.map_name.into_bytes()).into_owned());
-    srv.num_clients = Some(info.clients_on as u64);
-    srv.max_clients = Some(info.clients_max as u64);
+    srv.num_clients = Some(u64::from(info.clients_on));
+    srv.max_clients = Some(u64::from(info.clients_max));
 
     srv.rules.insert(
         "protocol-version".into(),

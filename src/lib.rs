@@ -59,7 +59,7 @@ fn to_v4(addr: SocketAddr) -> SocketAddr {
         }
     }
 
-    return addr;
+    addr
 }
 
 pub enum FullParseResult {
@@ -198,7 +198,7 @@ impl UdpQuery {
                     })
                 }
             })
-            .map_err(|e| failure::Error::from(e));
+            .map_err(failure::Error::from);
 
         let socket_sink =
             socket_sink.sink_map_err(|e| failure::Error::from(e.context("Socket sink error")));

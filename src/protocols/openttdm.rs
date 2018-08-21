@@ -43,7 +43,7 @@ pub enum State {
 
 impl Protocol for ProtocolImpl {
     fn make_request(&self, state: Option<Value>) -> Vec<u8> {
-        if let Some(_) = state {
+        if state.is_some() {
             openttd::Packet::ClientGetList(openttd::ClientGetListData {
                 master_server_version: MASTER_VERSION,
                 request_type: openttd::ServerListType::IPv6,

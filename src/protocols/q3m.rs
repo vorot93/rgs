@@ -52,7 +52,7 @@ impl Protocol for ProtocolImpl {
                         .context(Error::DataParseError)
                         .into()),
                 }) {
-                Ok(servers) => servers.into_iter().map(|v| Ok(v)).collect(),
+                Ok(servers) => servers.into_iter().map(Ok).collect(),
                 Err(e) => vec![Err(e)],
             }).map_err({
                 let p = p.clone();
