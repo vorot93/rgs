@@ -96,7 +96,7 @@ impl Debug for ServerFilter {
 #[derive(Debug)]
 pub struct ProtocolImpl {
     /// Version of the protocol
-    pub version: u8,
+    pub version: u32,
     /// Mapping between rule names and metadata fields
     pub rule_names: HashMap<Rule, String>,
     /// Filter required for sorting out data if the master is shared
