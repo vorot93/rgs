@@ -155,11 +155,11 @@ impl From<IncomingPacket> for (TProtocol, Packet) {
 
 /// Represents a single request by user to query the servers fed into sink.
 pub struct UdpQuery {
-    query_to_dns: Box<Future<Item = (), Error = failure::Error> + Send>,
-    dns_to_socket: Box<Future<Item = (), Error = failure::Error> + Send>,
-    socket_to_parser: Box<Future<Item = (), Error = failure::Error> + Send>,
+    query_to_dns: Box<Future<Item = (), Error = failure::Error> + Send + Sync>,
+    dns_to_socket: Box<Future<Item = (), Error = failure::Error> + Send + Sync>,
+    socket_to_parser: Box<Future<Item = (), Error = failure::Error> + Send + Sync>,
 
-    parser_stream: Box<Stream<Item = FullParseResult, Error = failure::Error> + Send>,
+    parser_stream: Box<Stream<Item = FullParseResult, Error = failure::Error> + Send + Sync>,
     input_sink: UnboundedSender<Query>,
     follow_up_sink: UnboundedSender<Query>,
 }
