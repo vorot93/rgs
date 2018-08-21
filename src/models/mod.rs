@@ -1,17 +1,20 @@
 use failure;
 use futures::prelude::*;
-use iso_country;
 use iso_country::Country as CountryBase;
-use serde::de::{Deserializer, Visitor};
-use serde::*;
-use serde_json;
-use serde_json::Value;
-use std;
-use std::collections::{BTreeMap, HashMap};
-use std::net::SocketAddr;
-use std::ops::Deref;
-use std::str::FromStr;
-use std::sync::Arc;
+use serde::{
+    de::{self, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
+use serde_json::{self, Value};
+use std::{
+    self,
+    collections::{BTreeMap, HashMap},
+    net::SocketAddr,
+    ops::Deref,
+    str::FromStr,
+    string::ToString,
+    sync::Arc,
+};
 
 #[derive(Clone, Debug)]
 pub struct ServerEntry {
@@ -69,6 +72,18 @@ pub enum Host {
 impl From<SocketAddr> for Host {
     fn from(addr: SocketAddr) -> Self {
         Host::A(addr)
+    }
+}
+
+impl<S> From<(S, u16)> for Host
+where
+    S: ToString,
+{
+    fn from((host, port): (S, u16)) -> Self {
+        Host::S(StringAddr {
+            host: host.to_string(),
+            port,
+        })
     }
 }
 
@@ -191,15 +206,8 @@ where
 
 pub type ProtocolConfig = std::collections::HashMap<String, TProtocol>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Country(CountryBase);
-
-impl Deref for Country {
-    type Target = iso_country::Country;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+#[derive(Clone, Debug, PartialEq, Eq, From)]
+pub struct Country(pub CountryBase);
 
 impl Default for Country {
     fn default() -> Country {
@@ -212,7 +220,7 @@ impl Serialize for Country {
     where
         S: Serializer,
     {
-        serializer.serialize_str(self.to_string().as_str())
+        serializer.serialize_str(self.0.to_string().as_str())
     }
 }
 
