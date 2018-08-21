@@ -4,29 +4,28 @@ pub mod openttds;
 pub mod q3m;
 pub mod q3s;
 
-use models::{Protocol, TProtocol};
+use models::TProtocol;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 pub fn make_default_protocols() -> HashMap<String, TProtocol> {
     let mut out = HashMap::new();
 
-    let openttds_proto = TProtocol::from(Arc::new(openttds::ProtocolImpl) as Arc<Protocol>);
-    let openttdm_proto = TProtocol::from(Arc::new(openttdm::ProtocolImpl {
+    let openttds_proto = TProtocol::from(openttds::ProtocolImpl);
+    let openttdm_proto = openttdm::ProtocolImpl {
         child: Some(openttds_proto.clone()),
-    }) as Arc<Protocol>);
+    }.into();
 
     let q3_ver = 68;
-    let q3s_proto = TProtocol::from(Arc::new(q3s::ProtocolImpl {
+    let q3s_proto = TProtocol::from(q3s::ProtocolImpl {
         version: q3_ver,
         ..Default::default()
-    }) as Arc<Protocol>);
-    let q3m_proto = TProtocol::from(Arc::new(q3m::ProtocolImpl {
+    });
+    let q3m_proto = q3m::ProtocolImpl {
         q3s_protocol: Some(q3s_proto.clone()),
         version: u32::from(q3_ver),
-    }) as Arc<Protocol>);
+    }.into();
 
-    out.insert("openttds".into(), openttds_proto.clone());
+    out.insert("openttds".into(), openttds_proto);
     out.insert("openttdm".into(), openttdm_proto);
     out.insert("q3s".into(), q3s_proto);
     out.insert("q3m".into(), q3m_proto);

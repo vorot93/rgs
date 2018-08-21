@@ -178,9 +178,14 @@ impl PartialEq for TProtocol {
     }
 }
 
-impl From<Arc<Protocol>> for TProtocol {
-    fn from(v: Arc<Protocol>) -> TProtocol {
-        Self { inner: v }
+impl<T> From<T> for TProtocol
+where
+    T: Protocol,
+{
+    fn from(v: T) -> Self {
+        Self {
+            inner: Arc::new(v) as Arc<Protocol>,
+        }
     }
 }
 
