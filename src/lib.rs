@@ -7,13 +7,13 @@
 extern crate byteorder;
 extern crate chrono;
 #[macro_use]
+extern crate derive_more;
+#[macro_use]
 extern crate failure;
 extern crate futures;
 extern crate iso_country;
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate maplit;
 extern crate num_traits;
 extern crate openttd;
 extern crate q3a;

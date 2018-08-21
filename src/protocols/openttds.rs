@@ -113,7 +113,7 @@ mod tests {
 
     use super::*;
     use futures::prelude::*;
-    use std::str::FromStr;
+    use std::{collections::HashMap, str::FromStr};
     use Protocol;
     fn fixtures() -> (SocketAddr, Vec<u8>, Server) {
         let addr = SocketAddr::from_str("127.0.0.1:9000").unwrap();
@@ -139,11 +139,14 @@ mod tests {
         srv.rules.insert("protocol-version".into(), json!(4));
         srv.rules.insert(
             "active-newgrf".into(),
-            json!(hashmap! {
-                478788 => "48b3f9e4fd0df2a72b5f44d3c8a2f4a0",
-                84100941 => "2e96b9ab2bea686bff94961ad433a701",
-                573780530 => "316180da1ba6444a06cd17f8fa79d60a",
-            }),
+            json!(
+                vec![
+                    (478788, "48b3f9e4fd0df2a72b5f44d3c8a2f4a0"),
+                    (84100941, "2e96b9ab2bea686bff94961ad433a701"),
+                    (573780530, "316180da1ba6444a06cd17f8fa79d60a"),
+                ].into_iter()
+                    .collect::<HashMap<_, _>>()
+            ),
         );
         srv.rules.insert("current-time".into(), 715875.into());
         srv.rules.insert("start-time".into(), 715875.into());

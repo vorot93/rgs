@@ -1,11 +1,14 @@
 use errors::{Error, Result};
 use models::{Packet, ParseResult, Player, Protocol, ProtocolResultStream, Server};
 
-use futures;
-use futures::prelude::*;
+use futures::stream::{empty, once};
 use q3a;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fmt::{self, Debug, Formatter},
+    sync::Arc,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Rule {
@@ -78,26 +81,44 @@ fn parse_q3a_server(
     Ok(())
 }
 
+pub type ServerFilterFunc = Arc<Fn(Server) -> Option<Server> + Send + Sync + 'static>;
+
+#[derive(Clone, From)]
+pub struct ServerFilter(pub ServerFilterFunc);
+
+impl Debug for ServerFilter {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "<ServerFilter>")
+    }
+}
+
 /// Quake III Arena server protocol implementation
 #[derive(Debug)]
 pub struct ProtocolImpl {
+    /// Version of the protocol
     pub version: u8,
+    /// Mapping between rule names and metadata fields
     pub rule_names: HashMap<Rule, String>,
+    /// Filter required for sorting out data if the master is shared
+    pub server_filter: ServerFilter,
 }
 
 impl Default for ProtocolImpl {
     fn default() -> Self {
         Self {
             version: 68,
-            rule_names: hashmap! {
-                Rule::Secure => "sv_punkbuster".into(),
-                Rule::MaxClients => "sv_maxclients".into(),
-                Rule::Mod => "game".into(),
-                Rule::GameType => "g_gametype".into(),
-                Rule::Map => "mapname".into(),
-                Rule::NeedPass => "g_needpass".into(),
-                Rule::ServerName => "sv_hostname".into(),
-            },
+            rule_names: [
+                (Rule::Secure, "sv_punkbuster"),
+                (Rule::MaxClients, "sv_maxclients"),
+                (Rule::Mod, "game"),
+                (Rule::GameType, "g_gametype"),
+                (Rule::Map, "mapname"),
+                (Rule::NeedPass, "g_needpass"),
+                (Rule::ServerName, "sv_hostname"),
+            ].into_iter()
+                .map(|(rule, name)| (*rule, name.to_string()))
+                .collect(),
+            server_filter: From::from(Arc::new(|srv| Some(srv)) as ServerFilterFunc),
         }
     }
 }
@@ -113,26 +134,29 @@ impl Protocol for ProtocolImpl {
     }
 
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
-        Box::new(
-            futures::stream::iter_result(vec![
-                q3a::Packet::from_bytes(p.data.as_slice().into())
-                    .map_err(|e| format_err!("{}", e))
-                    .and_then(|(_, pkt)| match pkt {
-                        q3a::Packet::StatusResponse(pkt) => {
-                            let mut server = Server::new(p.addr);
+        match q3a::Packet::from_bytes(p.data.as_slice().into())
+            .map_err(|e| format_err!("{}", e))
+            .and_then(|(_, pkt)| match pkt {
+                q3a::Packet::StatusResponse(pkt) => {
+                    let mut server = Server::new(p.addr);
 
-                            parse_q3a_server(&mut server, pkt, self.rule_names.clone())?;
+                    parse_q3a_server(&mut server, pkt, self.rule_names.clone())?;
 
-                            Ok(ParseResult::Output(server))
-                        }
-                        other => Err(format_err!("Wrong packet type: {:?}", other.get_type())
-                            .context(Error::DataParseError)
-                            .into()),
-                    }),
-            ]).map_err({
+                    Ok((self.server_filter.0)(server).map(ParseResult::Output))
+                }
+                other => Err(format_err!("Wrong packet type: {:?}", other.get_type())
+                    .context(Error::DataParseError)
+                    .into()),
+            })
+            .map_err({
                 let p = p.clone();
                 move |e| (Some(p.clone()), e)
-            }),
-        )
+            }) {
+            Ok(opt) => match opt {
+                Some(v) => Box::new(once(Ok(v))),
+                None => Box::new(empty()),
+            },
+            Err(e) => Box::new(once(Err(e))),
+        }
     }
 }

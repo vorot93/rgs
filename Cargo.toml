@@ -23,6 +23,7 @@ path = "src/main.rs"
 [dependencies]
 byteorder = "*"
 chrono = "*"
+derive_more = "*"
 enum-primitive-derive = "*"
 env_logger = "*"
 failure = "*"
