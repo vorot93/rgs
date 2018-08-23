@@ -14,6 +14,7 @@ use std::net::SocketAddr;
 #[derive(Clone, Debug, Default)]
 pub struct ProtocolImpl {
     pub q3s_protocol: Option<TProtocol>,
+    pub request_tag: Option<String>,
     pub version: u32,
 }
 
@@ -22,6 +23,7 @@ impl Protocol for ProtocolImpl {
     fn make_request(&self, _: Option<Value>) -> Vec<u8> {
         let mut out = Vec::new();
         q3a::Packet::GetServers(q3a::GetServersData {
+            request_tag: self.request_tag.clone(),
             version: self.version,
             extra: vec![Empty, Full].into_iter().collect(),
         }).write_bytes(&mut out)
