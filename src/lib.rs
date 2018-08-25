@@ -36,6 +36,7 @@ use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::net::{UdpFramed, UdpSocket};
 use tokio_codec::BytesCodec;
 
@@ -88,7 +89,7 @@ impl Sink for ParseMuxer {
         let mut results_stream = self.results_stream.take().unwrap();
         match item {
             Ok(incoming_packet) => {
-                let (protocol, pkt) = incoming_packet.into();
+                let (protocol, pkt, ping) = incoming_packet.into();
 
                 results_stream = Box::new(
                     results_stream.chain(
@@ -99,7 +100,10 @@ impl Sink for ParseMuxer {
                                 ),
                                 ParseResult::Output(s) => FullParseResult::Output(ServerEntry {
                                     protocol: protocol.clone(),
-                                    data: s,
+                                    data: Server {
+                                        ping: Some(ping),
+                                        ..s
+                                    },
                                 }),
                             })
                             .or_else(move |(pkt, e)| Ok(FullParseResult::Error((pkt, e)))),
@@ -138,10 +142,11 @@ impl Stream for ParseMuxer {
 struct IncomingPacket {
     pub addr: SocketAddr,
     pub protocol: TProtocol,
+    pub ping: Duration,
     pub data: Vec<u8>,
 }
 
-impl From<IncomingPacket> for (TProtocol, Packet) {
+impl From<IncomingPacket> for (TProtocol, Packet, Duration) {
     fn from(v: IncomingPacket) -> Self {
         (
             v.protocol,
@@ -149,6 +154,7 @@ impl From<IncomingPacket> for (TProtocol, Packet) {
                 addr: v.addr,
                 data: v.data,
             },
+            v.ping,
         )
     }
 }
@@ -169,6 +175,7 @@ impl UdpQuery {
         dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
         socket: UdpSocket,
     ) -> Self {
+        let ping_mapping = Arc::new(Mutex::new(HashMap::<SocketAddr, Instant>::new()));
         let protocol_mapping = ProtocolMapping::default();
         let dns_history = dns::History::default();
 
@@ -176,9 +183,24 @@ impl UdpQuery {
 
         let socket_stream = socket_stream
             .map({
+                let ping_mapping = ping_mapping.clone();
                 let protocol_mapping = protocol_mapping.clone();
                 move |(buf, mut addr)| {
                     addr = to_v4(addr);
+
+                    let ping = Instant::now().duration_since(
+                        ping_mapping
+                            .lock()
+                            .unwrap()
+                            .get(&addr)
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    format!("Could not determine ping for {}", addr),
+                                )
+                            })?
+                            .clone(),
+                    );
                     trace!("Received data from {}: {:?}", addr, buf);
                     let protocol = protocol_mapping
                         .lock()
@@ -194,6 +216,7 @@ impl UdpQuery {
                     Ok(IncomingPacket {
                         protocol,
                         addr,
+                        ping,
                         data: buf.to_vec(),
                     })
                 }
@@ -221,11 +244,13 @@ impl UdpQuery {
         let (dns_resolver_sink, dns_resolver_stream) = dns_resolver.split();
 
         let dns_resolver_stream = dns_resolver_stream.map({
+            let ping_mapping = ping_mapping.clone();
             let protocol_mapping = protocol_mapping.clone();
             move |v| {
                 let data = v.protocol.make_request(v.state);
                 trace!("Sending data to {}: {:?}", v.addr, data);
                 protocol_mapping.lock().unwrap().insert(v.addr, v.protocol);
+                ping_mapping.lock().unwrap().insert(v.addr, Instant::now());
                 (data.into(), v.addr)
             }
         });

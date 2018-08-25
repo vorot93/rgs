@@ -14,6 +14,7 @@ use std::{
     str::FromStr,
     string::ToString,
     sync::Arc,
+    time::Duration,
 };
 
 #[derive(Clone, Debug)]
@@ -313,7 +314,7 @@ pub struct Server {
     pub secure: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ping: Option<u64>,
+    pub ping: Option<Duration>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub players: Option<Vec<Player>>,
