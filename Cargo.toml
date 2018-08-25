@@ -32,7 +32,6 @@ futures = "0.1"
 futures-timer = "*"
 iso_country = "*"
 log = "*"
-maplit = "*"
 nom = "*"
 num-traits = "*"
 openttd = { git = "https://github.com/rust-game-parsers/openttd" }
@@ -46,3 +45,4 @@ tokio = "*"
 tokio-codec = "*"
 tokio-io = "*"
 tokio-dns-unofficial = "0.3.0"
+tokio-ping = { git = "https://github.com/knsd/tokio-ping" }

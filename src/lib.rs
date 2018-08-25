@@ -28,10 +28,17 @@ extern crate tokio;
 extern crate tokio_codec;
 extern crate tokio_dns;
 extern crate tokio_io;
+extern crate tokio_ping;
 
 use failure::Fail;
-use futures::prelude::*;
-use futures::sync::mpsc::UnboundedSender;
+use futures::{
+    empty,
+    future::ok,
+    prelude::*,
+    stream::{futures_unordered, FuturesUnordered},
+    sync::mpsc::UnboundedSender,
+};
+use rand::random;
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
@@ -159,6 +166,8 @@ impl From<IncomingPacket> for (TProtocol, Packet, Duration) {
     }
 }
 
+pub type PingerFuture = Box<Future<Item = ServerEntry, Error = failure::Error> + Send + Sync>;
+
 /// Represents a single request by user to query the servers fed into sink.
 pub struct UdpQuery {
     query_to_dns: Box<Future<Item = (), Error = failure::Error> + Send + Sync>,
@@ -168,11 +177,15 @@ pub struct UdpQuery {
     parser_stream: Box<Stream<Item = FullParseResult, Error = failure::Error> + Send + Sync>,
     input_sink: UnboundedSender<Query>,
     follow_up_sink: UnboundedSender<Query>,
+
+    pinger: Option<Arc<tokio_ping::Pinger>>,
+    pinger_stream: FuturesUnordered<PingerFuture>,
 }
 
 impl UdpQuery {
     fn new(
         dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
+        pinger: Option<Arc<tokio_ping::Pinger>>,
         socket: UdpSocket,
     ) -> Self {
         let ping_mapping = Arc::new(Mutex::new(HashMap::<SocketAddr, Instant>::new()));
@@ -262,6 +275,8 @@ impl UdpQuery {
         // Incoming pipe: UDP Socket -> Parser
         let socket_to_parser = Box::new(parser_sink.send_all(socket_stream).map(|_| ()));
 
+        let pinger_stream = futures_unordered(vec![Box::new(empty()) as PingerFuture]);
+
         Self {
             query_to_dns,
             dns_to_socket,
@@ -270,6 +285,9 @@ impl UdpQuery {
             parser_stream,
             input_sink,
             follow_up_sink,
+
+            pinger,
+            pinger_stream,
         }
     }
 }
@@ -308,8 +326,28 @@ impl Stream for UdpQuery {
                     FullParseResult::FollowUp(s) => {
                         self.follow_up_sink.unbounded_send(s).unwrap();
                     }
-                    FullParseResult::Output(s) => {
-                        return Ok(Async::Ready(Some(s)));
+                    FullParseResult::Output(mut srv) => {
+                        let addr = srv.data.addr;
+                        self.pinger_stream.push(match self.pinger.as_ref() {
+                            Some(pinger) => Box::new(
+                                pinger
+                                    .ping(addr.ip(), random(), 0, Duration::from_secs(10))
+                                    .then(move |rtt| {
+                                        match rtt {
+                                            Ok(ping) => if let Some(ping) = ping {
+                                                srv.data.ping = Some(
+                                                    std::time::Duration::from_millis(ping as u64),
+                                                );
+                                            },
+                                            Err(e) => {
+                                                debug!("Failed to ping {}: {}", addr, e);
+                                            }
+                                        }
+                                        Ok(srv)
+                                    }),
+                            ),
+                            None => Box::new(ok(srv)),
+                        });
                     }
                     FullParseResult::Error(e) => {
                         debug!(
@@ -328,18 +366,24 @@ impl Stream for UdpQuery {
             }
         }
 
+        if let Async::Ready(srv) = self.pinger_stream.poll()? {
+            return Ok(Async::Ready(srv));
+        }
+
         Ok(Async::NotReady)
     }
 }
 
 /// It can be used to spawn multiple UdpQueries.
 pub struct UdpQueryBuilder {
+    pinger: Option<Arc<tokio_ping::Pinger>>,
     dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
 }
 
 impl Default for UdpQueryBuilder {
     fn default() -> Self {
         Self {
+            pinger: None,
             dns_resolver: Arc::new(tokio_dns::CpuPoolResolver::new(8))
                 as Arc<tokio_dns::Resolver + Send + Sync + 'static>,
         }
@@ -355,8 +399,19 @@ impl UdpQueryBuilder {
         self
     }
 
+    pub fn with_pinger(mut self, pinger: Arc<tokio_ping::Pinger>) -> Self {
+        self.pinger = Some(pinger);
+        self
+    }
+
     pub fn build(&self, socket: UdpSocket) -> UdpQuery {
-        UdpQuery::new(Arc::clone(&self.dns_resolver), socket)
+        UdpQuery::new(
+            self.dns_resolver.clone(),
+            self.pinger
+                .clone()
+                .or_else(|| tokio_ping::Pinger::new().wait().ok().map(Arc::new)),
+            socket,
+        )
     }
 }
 

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use tokio_dns;
 
 pub fn resolve_host(
-    resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
+    resolver: &tokio_dns::Resolver,
     host: Host,
 ) -> Box<Future<Item = SocketAddr, Error = failure::Error> + Send> {
     match host {
@@ -73,13 +73,13 @@ impl Sink for Resolver {
 
     fn start_send(&mut self, query: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         self.pending_requests.push(Box::new(
-            resolve_host(self.inner.clone(), query.host.clone())
+            resolve_host(&*self.inner, query.host.clone())
                 .inspect({
                     let host = query.host.clone();
                     let history = Arc::clone(&self.history);
                     move |&addr| {
                         if let Host::S(ref s) = host {
-                            history.lock().unwrap().insert(addr.clone(), s.host.clone());
+                            history.lock().unwrap().insert(addr, s.host.clone());
                         }
                     }
                 })

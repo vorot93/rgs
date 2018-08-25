@@ -39,10 +39,7 @@ impl Eq for ServerEntry {}
 
 impl ServerEntry {
     pub fn new(protocol: TProtocol, data: Server) -> ServerEntry {
-        ServerEntry {
-            protocol: protocol,
-            data: data,
-        }
+        ServerEntry { protocol, data }
     }
 
     pub fn into_inner(self) -> (TProtocol, Server) {

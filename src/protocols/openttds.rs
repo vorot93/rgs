@@ -177,13 +177,11 @@ mod tests {
 
         let expectation = vec![ParseResult::Output(server)];
 
-        let result =
-            p.parse_response(Packet {
-                addr: addr,
-                data: data,
-            }).wait()
-                .map(|res| res.unwrap())
-                .collect::<Vec<ParseResult>>();
+        let result = p
+            .parse_response(Packet { addr, data })
+            .wait()
+            .map(|res| res.unwrap())
+            .collect::<Vec<ParseResult>>();
 
         assert_eq!(expectation, result);
     }
