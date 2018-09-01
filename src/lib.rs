@@ -41,7 +41,7 @@ use futures::{
 use rand::random;
 use std::collections::HashMap;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::net::{UdpFramed, UdpSocket};
@@ -179,6 +179,7 @@ pub struct UdpQuery {
     follow_up_sink: UnboundedSender<Query>,
 
     pinger: Option<Arc<tokio_ping::Pinger>>,
+    pinger_cache: Arc<Mutex<HashMap<IpAddr, Duration>>>,
     pinger_stream: FuturesUnordered<PingerFuture>,
 }
 
@@ -275,6 +276,7 @@ impl UdpQuery {
         // Incoming pipe: UDP Socket -> Parser
         let socket_to_parser = Box::new(parser_sink.send_all(socket_stream).map(|_| ()));
 
+        let pinger_cache = Default::default();
         let pinger_stream = futures_unordered(vec![Box::new(empty()) as PingerFuture]);
 
         Self {
@@ -287,6 +289,7 @@ impl UdpQuery {
             follow_up_sink,
 
             pinger,
+            pinger_cache,
             pinger_stream,
         }
     }
@@ -329,23 +332,41 @@ impl Stream for UdpQuery {
                     FullParseResult::Output(mut srv) => {
                         let addr = srv.data.addr;
                         self.pinger_stream.push(match self.pinger.as_ref() {
-                            Some(pinger) => Box::new(
-                                pinger
-                                    .ping(addr.ip(), random(), 0, Duration::from_secs(4))
-                                    .then(move |rtt| {
-                                        match rtt {
-                                            Ok(ping) => if let Some(ping) = ping {
-                                                srv.data.ping = Some(
-                                                    std::time::Duration::from_millis(ping as u64),
-                                                );
-                                            },
-                                            Err(e) => {
-                                                debug!("Failed to ping {}: {}", addr, e);
+                            Some(pinger) => if let Some(cached_ping) =
+                                self.pinger_cache.lock().unwrap().get(&addr.ip())
+                            {
+                                trace!("Found cached ping data for {}", addr);
+                                srv.data.ping = Some(*cached_ping);
+                                Box::new(ok(srv))
+                            } else {
+                                Box::new(
+                                    pinger
+                                        .ping(addr.ip(), random(), 0, Duration::from_secs(4))
+                                        .then({
+                                            let pinger_cache = self.pinger_cache.clone();
+                                            move |rtt| {
+                                                match rtt {
+                                                    Ok(ping) => if let Some(ping) = ping {
+                                                        let ping = std::time::Duration::from_millis(
+                                                            ping as u64,
+                                                        );
+
+                                                        pinger_cache
+                                                            .lock()
+                                                            .unwrap()
+                                                            .insert(addr.ip(), ping);
+
+                                                        srv.data.ping = Some(ping);
+                                                    },
+                                                    Err(e) => {
+                                                        debug!("Failed to ping {}: {}", addr, e);
+                                                    }
+                                                }
+                                                Ok(srv)
                                             }
-                                        }
-                                        Ok(srv)
-                                    }),
-                            ),
+                                        }),
+                                )
+                            },
                             None => Box::new(ok(srv)),
                         });
                     }
