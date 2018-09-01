@@ -111,8 +111,12 @@ impl Stream for Resolver {
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         if let Async::Ready(Some(result)) = self.pending_requests.poll()? {
             if let Some(resolved) = result {
-                debug!("Resolved: {:?}", resolved.addr);
-                return Ok(Async::Ready(Some(resolved)));
+                if resolved.addr.ip().is_unspecified() {
+                    debug!("Ignoring unspecified address");
+                } else {
+                    debug!("Resolved: {:?}", resolved.addr);
+                    return Ok(Async::Ready(Some(resolved)));
+                }
             }
         }
 

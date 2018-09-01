@@ -331,7 +331,7 @@ impl Stream for UdpQuery {
                         self.pinger_stream.push(match self.pinger.as_ref() {
                             Some(pinger) => Box::new(
                                 pinger
-                                    .ping(addr.ip(), random(), 0, Duration::from_secs(10))
+                                    .ping(addr.ip(), random(), 0, Duration::from_secs(4))
                                     .then(move |rtt| {
                                         match rtt {
                                             Ok(ping) => if let Some(ping) = ping {
@@ -405,13 +405,7 @@ impl UdpQueryBuilder {
     }
 
     pub fn build(&self, socket: UdpSocket) -> UdpQuery {
-        UdpQuery::new(
-            self.dns_resolver.clone(),
-            self.pinger
-                .clone()
-                .or_else(|| tokio_ping::Pinger::new().wait().ok().map(Arc::new)),
-            socket,
-        )
+        UdpQuery::new(self.dns_resolver.clone(), self.pinger.clone(), socket)
     }
 }
 
