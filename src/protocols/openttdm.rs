@@ -1,6 +1,7 @@
-use errors::{Error, Result};
+use errors::Error;
 use models::*;
 
+use failure::Fallible;
 use futures;
 use openttd;
 use serde_json::{self, Value};
@@ -9,7 +10,7 @@ use std::net::SocketAddr;
 
 const MASTER_VERSION: u8 = 2;
 
-fn parse_data(buf: &[u8]) -> Result<(openttd::ServerListType, HashSet<SocketAddr>)> {
+fn parse_data(buf: &[u8]) -> Fallible<(openttd::ServerListType, HashSet<SocketAddr>)> {
     let p = openttd::Packet::from_incoming_bytes(buf)
         .map_err(|e| format_err!("Nom failure while parsing: {}", e))?
         .1;

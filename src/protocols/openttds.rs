@@ -1,6 +1,7 @@
-use errors::{Error, Result};
+use errors::Error;
 use models::*;
 
+use failure::Fallible;
 use futures;
 use openttd;
 use serde_json::Value;
@@ -34,7 +35,7 @@ fn write_v4_data(srv: &mut Server, v: openttd::V4Data) {
     );
 }
 
-fn parse_server(addr: SocketAddr, info: openttd::ServerResponse) -> Result<Server> {
+fn parse_server(addr: SocketAddr, info: openttd::ServerResponse) -> Fallible<Server> {
     let mut srv = Server::new(addr);
     srv.status = Status::Up;
 
@@ -79,7 +80,7 @@ fn parse_server(addr: SocketAddr, info: openttd::ServerResponse) -> Result<Serve
     Ok(srv)
 }
 
-fn parse_data(addr: SocketAddr, buf: &[u8]) -> Result<Server> {
+fn parse_data(addr: SocketAddr, buf: &[u8]) -> Fallible<Server> {
     let p = openttd::Packet::from_incoming_bytes(buf)
         .map_err(|e| format_err!("{}", e))?
         .1;

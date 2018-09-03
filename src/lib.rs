@@ -30,7 +30,7 @@ extern crate tokio_dns;
 extern crate tokio_io;
 extern crate tokio_ping;
 
-use failure::Fail;
+use failure::{Fail, Fallible};
 use futures::{
     empty,
     future::ok,
@@ -53,8 +53,6 @@ pub mod errors;
 pub mod models;
 pub use models::*;
 pub mod protocols;
-
-use errors::Result;
 
 type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, TProtocol>>>;
 
@@ -89,7 +87,7 @@ impl ParseMuxer {
 }
 
 impl Sink for ParseMuxer {
-    type SinkItem = Result<IncomingPacket>;
+    type SinkItem = Fallible<IncomingPacket>;
     type SinkError = failure::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
@@ -200,9 +198,11 @@ impl UdpQuery {
                 let ping_mapping = ping_mapping.clone();
                 let protocol_mapping = protocol_mapping.clone();
                 move |(buf, mut addr)| {
+                    let now = Instant::now();
+
                     addr = to_v4(addr);
 
-                    let ping = Instant::now().duration_since(
+                    let ping = now.duration_since(
                         ping_mapping
                             .lock()
                             .unwrap()
@@ -323,66 +323,72 @@ impl Stream for UdpQuery {
         self.dns_to_socket.poll()?;
         self.socket_to_parser.poll()?;
 
-        if let Async::Ready(v) = self.parser_stream.poll()? {
-            match v {
-                Some(data) => match data {
-                    FullParseResult::FollowUp(s) => {
-                        self.follow_up_sink.unbounded_send(s).unwrap();
-                    }
-                    FullParseResult::Output(mut srv) => {
-                        let addr = srv.data.addr;
-                        self.pinger_stream.push(match self.pinger.as_ref() {
-                            Some(pinger) => if let Some(cached_ping) =
-                                self.pinger_cache.lock().unwrap().get(&addr.ip())
-                            {
-                                trace!("Found cached ping data for {}", addr);
-                                srv.data.ping = Some(*cached_ping);
-                                Box::new(ok(srv))
-                            } else {
-                                Box::new(
-                                    pinger
-                                        .ping(addr.ip(), random(), 0, Duration::from_secs(4))
-                                        .then({
-                                            let pinger_cache = self.pinger_cache.clone();
-                                            move |rtt| {
-                                                match rtt {
-                                                    Ok(ping) => if let Some(ping) = ping {
-                                                        let ping = std::time::Duration::from_millis(
-                                                            ping as u64,
-                                                        );
+        if self.pinger_stream.len() < 20 {
+            if let Async::Ready(v) = self.parser_stream.poll()? {
+                match v {
+                    Some(data) => match data {
+                        FullParseResult::FollowUp(s) => {
+                            self.follow_up_sink.unbounded_send(s).unwrap();
+                        }
+                        FullParseResult::Output(mut srv) => {
+                            let addr = srv.data.addr;
+                            self.pinger_stream.push(match self.pinger.as_ref() {
+                                Some(pinger) => if let Some(cached_ping) =
+                                    self.pinger_cache.lock().unwrap().get(&addr.ip())
+                                {
+                                    trace!("Found cached ping data for {}", addr);
+                                    srv.data.ping = Some(*cached_ping);
+                                    Box::new(ok(srv))
+                                } else {
+                                    Box::new(
+                                        pinger
+                                            .ping(addr.ip(), random(), 0, Duration::from_secs(4))
+                                            .then({
+                                                let pinger_cache = self.pinger_cache.clone();
+                                                move |rtt| {
+                                                    match rtt {
+                                                        Ok(ping) => if let Some(ping) = ping {
+                                                            let ping =
+                                                                std::time::Duration::from_millis(
+                                                                    ping as u64,
+                                                                );
 
-                                                        pinger_cache
-                                                            .lock()
-                                                            .unwrap()
-                                                            .insert(addr.ip(), ping);
+                                                            pinger_cache
+                                                                .lock()
+                                                                .unwrap()
+                                                                .insert(addr.ip(), ping);
 
-                                                        srv.data.ping = Some(ping);
-                                                    },
-                                                    Err(e) => {
-                                                        debug!("Failed to ping {}: {}", addr, e);
+                                                            srv.data.ping = Some(ping);
+                                                        },
+                                                        Err(e) => {
+                                                            debug!(
+                                                                "Failed to ping {}: {}",
+                                                                addr, e
+                                                            );
+                                                        }
                                                     }
+                                                    Ok(srv)
                                                 }
-                                                Ok(srv)
-                                            }
-                                        }),
-                                )
-                            },
-                            None => Box::new(ok(srv)),
-                        });
+                                            }),
+                                    )
+                                },
+                                None => Box::new(ok(srv)),
+                            });
+                        }
+                        FullParseResult::Error(e) => {
+                            debug!(
+                                "Parser returned error. Addr: {:?}, Data: {:?}, Error: {:?}",
+                                e.0.clone().map(|e| e.addr),
+                                e.0
+                                    .clone()
+                                    .map(|e| String::from_utf8_lossy(&e.data).to_string()),
+                                e.1
+                            );
+                        }
+                    },
+                    None => {
+                        return Ok(Async::NotReady);
                     }
-                    FullParseResult::Error(e) => {
-                        debug!(
-                            "Parser returned error. Addr: {:?}, Data: {:?}, Error: {:?}",
-                            e.0.clone().map(|e| e.addr),
-                            e.0
-                                .clone()
-                                .map(|e| String::from_utf8_lossy(&e.data).to_string()),
-                            e.1
-                        );
-                    }
-                },
-                None => {
-                    return Ok(Async::NotReady);
                 }
             }
         }
