@@ -38,7 +38,7 @@ use futures::{
     stream::{futures_unordered, FuturesUnordered},
     sync::mpsc::UnboundedSender,
 };
-use rand::random;
+use ping::Pinger;
 use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -52,6 +52,7 @@ pub mod dns;
 pub mod errors;
 pub mod models;
 pub use models::*;
+pub mod ping;
 pub mod protocols;
 
 type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, TProtocol>>>;
@@ -110,8 +111,7 @@ impl Sink for ParseMuxer {
                                         ..s
                                     },
                                 }),
-                            })
-                            .or_else(move |(pkt, e)| Ok(FullParseResult::Error((pkt, e)))),
+                            }).or_else(move |(pkt, e)| Ok(FullParseResult::Error((pkt, e)))),
                     ),
                 );
             }
@@ -176,7 +176,7 @@ pub struct UdpQuery {
     input_sink: UnboundedSender<Query>,
     follow_up_sink: UnboundedSender<Query>,
 
-    pinger: Option<Arc<tokio_ping::Pinger>>,
+    pinger: Arc<Pinger>,
     pinger_cache: Arc<Mutex<HashMap<IpAddr, Duration>>>,
     pinger_stream: FuturesUnordered<PingerFuture>,
 }
@@ -184,7 +184,7 @@ pub struct UdpQuery {
 impl UdpQuery {
     fn new(
         dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
-        pinger: Option<Arc<tokio_ping::Pinger>>,
+        pinger: Arc<Pinger>,
         socket: UdpSocket,
     ) -> Self {
         let ping_mapping = Arc::new(Mutex::new(HashMap::<SocketAddr, Instant>::new()));
@@ -212,8 +212,7 @@ impl UdpQuery {
                                     io::ErrorKind::InvalidData,
                                     format!("Could not determine ping for {}", addr),
                                 )
-                            })?
-                            .clone(),
+                            })?.clone(),
                     );
                     trace!("Received data from {}: {:?}", addr, buf);
                     let protocol = protocol_mapping
@@ -225,8 +224,7 @@ impl UdpQuery {
                                 io::ErrorKind::InvalidData,
                                 format!("Could not determine protocol for {}", addr),
                             )
-                        })?
-                        .clone();
+                        })?.clone();
                     Ok(IncomingPacket {
                         protocol,
                         addr,
@@ -234,8 +232,7 @@ impl UdpQuery {
                         data: buf.to_vec(),
                     })
                 }
-            })
-            .map_err(failure::Error::from);
+            }).map_err(failure::Error::from);
 
         let socket_sink =
             socket_sink.sink_map_err(|e| failure::Error::from(e.context("Socket sink error")));
@@ -332,55 +329,41 @@ impl Stream for UdpQuery {
                         }
                         FullParseResult::Output(mut srv) => {
                             let addr = srv.data.addr;
-                            self.pinger_stream.push(match self.pinger.as_ref() {
-                                Some(pinger) => if let Some(cached_ping) =
-                                    self.pinger_cache.lock().unwrap().get(&addr.ip())
-                                {
-                                    trace!("Found cached ping data for {}", addr);
-                                    srv.data.ping = Some(*cached_ping);
-                                    Box::new(ok(srv))
-                                } else {
-                                    Box::new(
-                                        pinger
-                                            .ping(addr.ip(), random(), 0, Duration::from_secs(4))
-                                            .then({
-                                                let pinger_cache = self.pinger_cache.clone();
-                                                move |rtt| {
-                                                    match rtt {
-                                                        Ok(ping) => if let Some(ping) = ping {
-                                                            let ping =
-                                                                std::time::Duration::from_millis(
-                                                                    ping as u64,
-                                                                );
+                            self.pinger_stream.push(if let Some(cached_ping) =
+                                self.pinger_cache.lock().unwrap().get(&addr.ip())
+                            {
+                                trace!("Found cached ping data for {}", addr);
+                                srv.data.ping = Some(*cached_ping);
+                                Box::new(ok(srv))
+                            } else {
+                                Box::new(self.pinger.ping(addr.ip()).then({
+                                    let pinger_cache = self.pinger_cache.clone();
+                                    move |rtt| {
+                                        match rtt {
+                                            Ok(v) => {
+                                                if let Some(v) = v {
+                                                    pinger_cache
+                                                        .lock()
+                                                        .unwrap()
+                                                        .insert(addr.ip(), v);
 
-                                                            pinger_cache
-                                                                .lock()
-                                                                .unwrap()
-                                                                .insert(addr.ip(), ping);
-
-                                                            srv.data.ping = Some(ping);
-                                                        },
-                                                        Err(e) => {
-                                                            debug!(
-                                                                "Failed to ping {}: {}",
-                                                                addr, e
-                                                            );
-                                                        }
-                                                    }
-                                                    Ok(srv)
+                                                    srv.data.ping = Some(v);
                                                 }
-                                            }),
-                                    )
-                                },
-                                None => Box::new(ok(srv)),
+                                            }
+                                            Err(e) => {
+                                                debug!("Failed to ping {}: {}", addr, e);
+                                            }
+                                        }
+                                        Ok(srv)
+                                    }
+                                }))
                             });
                         }
                         FullParseResult::Error(e) => {
                             debug!(
                                 "Parser returned error. Addr: {:?}, Data: {:?}, Error: {:?}",
                                 e.0.clone().map(|e| e.addr),
-                                e.0
-                                    .clone()
+                                e.0.clone()
                                     .map(|e| String::from_utf8_lossy(&e.data).to_string()),
                                 e.1
                             );
@@ -403,14 +386,14 @@ impl Stream for UdpQuery {
 
 /// It can be used to spawn multiple UdpQueries.
 pub struct UdpQueryBuilder {
-    pinger: Option<Arc<tokio_ping::Pinger>>,
+    pinger: Arc<Pinger>,
     dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
 }
 
 impl Default for UdpQueryBuilder {
     fn default() -> Self {
         Self {
-            pinger: None,
+            pinger: Arc::new(ping::DummyPinger),
             dns_resolver: Arc::new(tokio_dns::CpuPoolResolver::new(8))
                 as Arc<tokio_dns::Resolver + Send + Sync + 'static>,
         }
@@ -426,8 +409,11 @@ impl UdpQueryBuilder {
         self
     }
 
-    pub fn with_pinger(mut self, pinger: Arc<tokio_ping::Pinger>) -> Self {
-        self.pinger = Some(pinger);
+    pub fn with_pinger<T>(mut self, pinger: T) -> Self
+    where
+        T: Into<Arc<Pinger>>,
+    {
+        self.pinger = pinger.into();
         self
     }
 

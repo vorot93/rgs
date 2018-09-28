@@ -116,7 +116,8 @@ impl Default for ProtocolImpl {
                 (Rule::Map, "mapname"),
                 (Rule::NeedPass, "g_needpass"),
                 (Rule::ServerName, "sv_hostname"),
-            ].into_iter()
+            ]
+                .into_iter()
                 .map(|(rule, name)| (*rule, name.to_string()))
                 .collect(),
             server_filter: From::from(Arc::new(Some) as ServerFilterFunc),
@@ -130,7 +131,7 @@ impl Protocol for ProtocolImpl {
         q3a::Packet::GetStatus(q3a::GetStatusData {
             challenge: "RGS".into(),
         }).write_bytes(&mut out)
-            .unwrap();
+        .unwrap();
         out
     }
 
@@ -148,8 +149,7 @@ impl Protocol for ProtocolImpl {
                 other => Err(format_err!("Wrong packet type: {:?}", other.get_type())
                     .context(Error::DataParseError)
                     .into()),
-            })
-            .map_err({
+            }).map_err({
                 let p = p.clone();
                 move |e| (Some(p.clone()), e)
             }) {

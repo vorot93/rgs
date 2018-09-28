@@ -62,12 +62,10 @@ fn main() {
                     debug!("{:?}", entry);
                     *total_queried.lock().unwrap() += 1;
                 }
-            })
-            .map_err(|e| {
+            }).map_err(|e| {
                 debug!("UdpQuery returned an error: {:?}", e);
                 e
-            })
-            .timeout(timeout)
+            }).timeout(timeout)
             .for_each(|_| Ok(()))
             .map(|_| ())
             .map_err(|_| ()),

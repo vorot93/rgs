@@ -146,7 +146,7 @@ mod tests {
                     (84100941, "2e96b9ab2bea686bff94961ad433a701"),
                     (573780530, "316180da1ba6444a06cd17f8fa79d60a"),
                 ].into_iter()
-                    .collect::<HashMap<_, _>>()
+                .collect::<HashMap<_, _>>()
             ),
         );
         srv.rules.insert("current-time".into(), 715875.into());

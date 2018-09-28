@@ -27,7 +27,7 @@ impl Protocol for ProtocolImpl {
             version: self.version,
             extra: vec![Empty, Full].into_iter().collect(),
         }).write_bytes(&mut out)
-            .unwrap();
+        .unwrap();
         out
     }
     /// Create a stream of parsed values out of incoming response.
@@ -46,8 +46,7 @@ impl Protocol for ProtocolImpl {
                                     state: None,
                                     protocol: FollowUpQueryProtocol::Child(q3s_protocol.clone()),
                                 })
-                            })
-                            .collect(),
+                            }).collect(),
                         None => vec![],
                     }),
                     other => Err(format_err!("Wrong packet type: {:?}", other.get_type())

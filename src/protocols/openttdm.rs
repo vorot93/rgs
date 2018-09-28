@@ -55,7 +55,7 @@ impl Protocol for ProtocolImpl {
                 request_type: openttd::ServerListType::IPv4,
             })
         }.to_bytes()
-            .unwrap()
+        .unwrap()
     }
 
     fn parse_response(&self, pkt: Packet) -> ProtocolResultStream {
@@ -72,14 +72,13 @@ impl Protocol for ProtocolImpl {
                     }
                     _ => vec![],
                 }.into_iter()
-                    .chain(data.into_iter().map(move |addr| {
-                        Ok(ParseResult::FollowUp(FollowUpQuery {
-                            host: Host::A(addr),
-                            protocol: FollowUpQueryProtocol::Child(child.clone()),
-                            state: None,
-                        }))
+                .chain(data.into_iter().map(move |addr| {
+                    Ok(ParseResult::FollowUp(FollowUpQuery {
+                        host: Host::A(addr),
+                        protocol: FollowUpQueryProtocol::Child(child.clone()),
+                        state: None,
                     }))
-                    .collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
             }))
         } else {
             Box::new(futures::stream::iter_ok(vec![]))

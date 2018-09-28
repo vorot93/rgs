@@ -82,15 +82,13 @@ impl Sink for Resolver {
                             history.lock().unwrap().insert(addr, s.host.clone());
                         }
                     }
-                })
-                .map(|addr| {
+                }).map(|addr| {
                     Some(ResolvedQuery {
                         addr,
                         protocol: query.protocol,
                         state: query.state,
                     })
-                })
-                .or_else(|_e| Ok(None)),
+                }).or_else(|_e| Ok(None)),
         ));
         Ok(AsyncSink::Ready)
     }
