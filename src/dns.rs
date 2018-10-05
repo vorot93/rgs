@@ -11,28 +11,33 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio_dns;
 
-pub fn resolve_host(
-    resolver: &tokio_dns::Resolver,
-    host: Host,
-) -> Box<Future<Item = SocketAddr, Error = failure::Error> + Send> {
-    match host {
-        Host::A(addr) => Box::new(futures::future::ok(addr)),
-        Host::S(stringaddr) => Box::new(
-            resolver
-                .resolve(&stringaddr.host)
-                .map_err(|e| e.into())
-                .and_then(move |addrs| {
-                    addrs
-                        .into_iter()
-                        .next()
-                        .map(|ipaddr| SocketAddr::new(ipaddr, stringaddr.port))
-                        .ok_or_else(|| {
-                            format_err!("Failed to resolve host {}", &stringaddr.host)
-                                .context(Error::NetworkError)
-                                .into()
-                        })
-                }),
-        ),
+pub trait Resolver: Send + Sync + 'static {
+    fn resolve(&self, host: Host) -> Box<Future<Item = SocketAddr, Error = failure::Error> + Send>;
+}
+
+impl<T> Resolver for T
+where
+    T: tokio_dns::Resolver + Send + Sync + 'static,
+{
+    fn resolve(&self, host: Host) -> Box<Future<Item = SocketAddr, Error = failure::Error> + Send> {
+        match host {
+            Host::A(addr) => Box::new(futures::future::ok(addr)),
+            Host::S(stringaddr) => Box::new(
+                tokio_dns::Resolver::resolve(self, &stringaddr.host)
+                    .map_err(|e| e.into())
+                    .and_then(move |addrs| {
+                        addrs
+                            .into_iter()
+                            .next()
+                            .map(|ipaddr| SocketAddr::new(ipaddr, stringaddr.port))
+                            .ok_or_else(|| {
+                                format_err!("Failed to resolve host {}", &stringaddr.host)
+                                    .context(Error::NetworkError)
+                                    .into()
+                            })
+                    }),
+            ),
+        }
     }
 }
 
@@ -44,18 +49,15 @@ pub struct ResolvedQuery {
     pub state: Option<Value>,
 }
 
-pub struct Resolver {
-    inner: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
+pub struct ResolverPipe {
+    inner: Arc<Resolver>,
     history: History,
     pending_requests:
         FuturesUnordered<Box<Future<Item = Option<ResolvedQuery>, Error = failure::Error> + Send>>,
 }
 
-impl Resolver {
-    pub fn new(
-        resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
-        history: History,
-    ) -> Self {
+impl ResolverPipe {
+    pub fn new(resolver: Arc<Resolver>, history: History) -> Self {
         let mut pending_requests = FuturesUnordered::new();
         pending_requests.push(Box::new(futures::future::empty())
             as Box<Future<Item = Option<ResolvedQuery>, Error = failure::Error> + Send>);
@@ -67,13 +69,14 @@ impl Resolver {
     }
 }
 
-impl Sink for Resolver {
+impl Sink for ResolverPipe {
     type SinkItem = Query;
     type SinkError = failure::Error;
 
     fn start_send(&mut self, query: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         self.pending_requests.push(Box::new(
-            resolve_host(&*self.inner, query.host.clone())
+            self.inner
+                .resolve(query.host.clone())
                 .inspect({
                     let host = query.host.clone();
                     let history = Arc::clone(&self.history);
@@ -102,7 +105,7 @@ impl Sink for Resolver {
     }
 }
 
-impl Stream for Resolver {
+impl Stream for ResolverPipe {
     type Item = ResolvedQuery;
     type Error = failure::Error;
 

@@ -30,6 +30,7 @@ extern crate tokio_dns;
 extern crate tokio_io;
 extern crate tokio_ping;
 
+use dns::Resolver;
 use failure::{Fail, Fallible};
 use futures::{
     empty,
@@ -182,11 +183,11 @@ pub struct UdpQuery {
 }
 
 impl UdpQuery {
-    fn new(
-        dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
-        pinger: Arc<Pinger>,
-        socket: UdpSocket,
-    ) -> Self {
+    fn new<D, P>(dns_resolver: D, pinger: P, socket: UdpSocket) -> Self
+    where
+        D: Into<Arc<Resolver>>,
+        P: Into<Arc<Pinger>>,
+    {
         let ping_mapping = Arc::new(Mutex::new(HashMap::<SocketAddr, Instant>::new()));
         let protocol_mapping = ProtocolMapping::default();
         let dns_history = dns::History::default();
@@ -246,7 +247,7 @@ impl UdpQuery {
         let (input_sink, follow_up_sink) = (query_sink.clone(), query_sink.clone());
 
         let parser = ParseMuxer::new();
-        let dns_resolver = dns::Resolver::new(dns_resolver, dns_history.clone());
+        let dns_resolver = dns::ResolverPipe::new(dns_resolver.into(), dns_history.clone());
 
         let (parser_sink, parser_stream) = parser.split();
         let parser_stream = Box::new(
@@ -285,7 +286,7 @@ impl UdpQuery {
             input_sink,
             follow_up_sink,
 
-            pinger,
+            pinger: pinger.into(),
             pinger_cache,
             pinger_stream,
         }
@@ -387,24 +388,20 @@ impl Stream for UdpQuery {
 /// It can be used to spawn multiple UdpQueries.
 pub struct UdpQueryBuilder {
     pinger: Arc<Pinger>,
-    dns_resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
+    dns_resolver: Arc<Resolver>,
 }
 
 impl Default for UdpQueryBuilder {
     fn default() -> Self {
         Self {
             pinger: Arc::new(ping::DummyPinger),
-            dns_resolver: Arc::new(tokio_dns::CpuPoolResolver::new(8))
-                as Arc<tokio_dns::Resolver + Send + Sync + 'static>,
+            dns_resolver: Arc::new(tokio_dns::CpuPoolResolver::new(8)) as Arc<Resolver>,
         }
     }
 }
 
 impl UdpQueryBuilder {
-    pub fn with_dns_resolver(
-        mut self,
-        resolver: Arc<tokio_dns::Resolver + Send + Sync + 'static>,
-    ) -> Self {
+    pub fn with_dns_resolver(mut self, resolver: Arc<Resolver>) -> Self {
         self.dns_resolver = resolver;
         self
     }
