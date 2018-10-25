@@ -38,8 +38,7 @@ openttd = { git = "https://github.com/rust-game-parsers/openttd" }
 q3a = { git = "https://github.com/rust-game-parsers/q3a" }
 rand = "*"
 resolve = "*"
-serde = "*"
-serde_derive = "*"
+serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 tokio = "*"
 tokio-codec = "*"

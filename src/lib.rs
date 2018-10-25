@@ -19,9 +19,8 @@ extern crate openttd;
 extern crate q3a;
 extern crate rand;
 extern crate resolve;
-extern crate serde;
 #[macro_use]
-extern crate serde_derive;
+extern crate serde;
 #[cfg_attr(test, macro_use)]
 extern crate serde_json;
 extern crate tokio;
