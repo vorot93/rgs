@@ -1,6 +1,7 @@
 [package]
 name = "rgs"
 version = "0.2.0"
+edition = "2018"
 authors = [
     "Artem Vorotnikov <artem@vorotnikov.me>",
 ]

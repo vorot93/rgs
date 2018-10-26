@@ -1,3 +1,4 @@
+use derive_more::From;
 use failure;
 use futures::prelude::*;
 use iso_country::Country as CountryBase;
@@ -342,7 +343,7 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
-    extern crate serde_json;
+    use serde_json::json;
 
     fn fixtures() -> (Value, Server) {
         let mut srv = Server::new(std::net::SocketAddr::from_str("127.0.0.1:9000").unwrap());

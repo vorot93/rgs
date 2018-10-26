@@ -1,7 +1,7 @@
-use errors::Error;
-use models::*;
+use crate::errors::Error;
+use crate::models::*;
 
-use failure::Fallible;
+use failure::{format_err, Fallible};
 use futures;
 use openttd;
 use serde_json::Value;
@@ -100,22 +100,22 @@ impl Protocol for ProtocolImpl {
     }
 
     fn parse_response(&self, pkt: Packet) -> ProtocolResultStream {
-        Box::new(futures::stream::iter_result(vec![
-            parse_data(pkt.addr, &pkt.data)
-                .map(ParseResult::Output)
-                .map_err(|e| (Some(pkt), e.context(Error::DataParseError).into())),
-        ]))
+        Box::new(futures::stream::iter_result(vec![parse_data(
+            pkt.addr, &pkt.data,
+        )
+        .map(ParseResult::Output)
+        .map_err(|e| (Some(pkt), e.context(Error::DataParseError).into()))]))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    extern crate serde_json;
-
+    use super::Protocol;
     use super::*;
     use futures::prelude::*;
+    use serde_json::json;
     use std::{collections::HashMap, str::FromStr};
-    use Protocol;
+
     fn fixtures() -> (SocketAddr, Vec<u8>, Server) {
         let addr = SocketAddr::from_str("127.0.0.1:9000").unwrap();
         let data = vec![
@@ -140,14 +140,13 @@ mod tests {
         srv.rules.insert("protocol-version".into(), json!(4));
         srv.rules.insert(
             "active-newgrf".into(),
-            json!(
-                vec![
-                    (478788, "48b3f9e4fd0df2a72b5f44d3c8a2f4a0"),
-                    (84100941, "2e96b9ab2bea686bff94961ad433a701"),
-                    (573780530, "316180da1ba6444a06cd17f8fa79d60a"),
-                ].into_iter()
-                .collect::<HashMap<_, _>>()
-            ),
+            json!(vec![
+                (478788, "48b3f9e4fd0df2a72b5f44d3c8a2f4a0"),
+                (84100941, "2e96b9ab2bea686bff94961ad433a701"),
+                (573780530, "316180da1ba6444a06cd17f8fa79d60a"),
+            ]
+            .into_iter()
+            .collect::<HashMap<_, _>>()),
         );
         srv.rules.insert("current-time".into(), 715875.into());
         srv.rules.insert("start-time".into(), 715875.into());

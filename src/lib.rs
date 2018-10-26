@@ -4,33 +4,7 @@
 //! The `rgs` crate provides tools to asynchronously retrieve game server information like
 //! IP, server metadata, player list and more.
 
-extern crate byteorder;
-extern crate chrono;
-#[macro_use]
-extern crate derive_more;
-#[macro_use]
-extern crate failure;
-extern crate futures;
-extern crate iso_country;
-#[macro_use]
-extern crate log;
-extern crate num_traits;
-extern crate openttd;
-extern crate q3a;
-extern crate rand;
-extern crate resolve;
-#[macro_use]
-extern crate serde;
-#[cfg_attr(test, macro_use)]
-extern crate serde_json;
-extern crate tokio;
-extern crate tokio_codec;
-extern crate tokio_dns;
-extern crate tokio_io;
-extern crate tokio_ping;
-
-use dns::Resolver;
-use failure::{Fail, Fallible};
+use failure::{format_err, Fail, Fallible};
 use futures::{
     empty,
     future::ok,
@@ -38,7 +12,7 @@ use futures::{
     stream::{futures_unordered, FuturesUnordered},
     sync::mpsc::UnboundedSender,
 };
-use ping::Pinger;
+use log::{debug, trace};
 use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -51,14 +25,17 @@ pub mod dns;
 #[macro_use]
 pub mod errors;
 pub mod models;
-pub use models::*;
+pub use self::models::*;
 pub mod ping;
 pub mod protocols;
+
+use self::dns::Resolver;
+use self::ping::Pinger;
 
 type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, TProtocol>>>;
 
 fn to_v4(addr: SocketAddr) -> SocketAddr {
-    use SocketAddr::*;
+    use self::SocketAddr::*;
 
     if let V6(v) = addr {
         if let Some(v4_addr) = v.ip().to_ipv4() {
@@ -111,7 +88,8 @@ impl Sink for ParseMuxer {
                                         ..s
                                     },
                                 }),
-                            }).or_else(move |(pkt, e)| Ok(FullParseResult::Error((pkt, e)))),
+                            })
+                            .or_else(move |(pkt, e)| Ok(FullParseResult::Error((pkt, e)))),
                     ),
                 );
             }
@@ -212,7 +190,8 @@ impl UdpQuery {
                                     io::ErrorKind::InvalidData,
                                     format!("Could not determine ping for {}", addr),
                                 )
-                            })?.clone(),
+                            })?
+                            .clone(),
                     );
                     trace!("Received data from {}: {:?}", addr, buf);
                     let protocol = protocol_mapping
@@ -224,7 +203,8 @@ impl UdpQuery {
                                 io::ErrorKind::InvalidData,
                                 format!("Could not determine protocol for {}", addr),
                             )
-                        })?.clone();
+                        })?
+                        .clone();
                     Ok(IncomingPacket {
                         protocol,
                         addr,
@@ -232,7 +212,8 @@ impl UdpQuery {
                         data: buf.to_vec(),
                     })
                 }
-            }).map_err(failure::Error::from);
+            })
+            .map_err(failure::Error::from);
 
         let socket_sink =
             socket_sink.sink_map_err(|e| failure::Error::from(e.context("Socket sink error")));
@@ -329,35 +310,37 @@ impl Stream for UdpQuery {
                         }
                         FullParseResult::Output(mut srv) => {
                             let addr = srv.data.addr;
-                            self.pinger_stream.push(if let Some(cached_ping) =
-                                self.pinger_cache.lock().unwrap().get(&addr.ip())
-                            {
-                                trace!("Found cached ping data for {}", addr);
-                                srv.data.ping = Some(*cached_ping);
-                                Box::new(ok(srv))
-                            } else {
-                                Box::new(self.pinger.ping(addr.ip()).then({
-                                    let pinger_cache = self.pinger_cache.clone();
-                                    move |rtt| {
-                                        match rtt {
-                                            Ok(v) => {
-                                                if let Some(v) = v {
-                                                    pinger_cache
-                                                        .lock()
-                                                        .unwrap()
-                                                        .insert(addr.ip(), v);
+                            self.pinger_stream.push(
+                                if let Some(cached_ping) =
+                                    self.pinger_cache.lock().unwrap().get(&addr.ip())
+                                {
+                                    trace!("Found cached ping data for {}", addr);
+                                    srv.data.ping = Some(*cached_ping);
+                                    Box::new(ok(srv))
+                                } else {
+                                    Box::new(self.pinger.ping(addr.ip()).then({
+                                        let pinger_cache = self.pinger_cache.clone();
+                                        move |rtt| {
+                                            match rtt {
+                                                Ok(v) => {
+                                                    if let Some(v) = v {
+                                                        pinger_cache
+                                                            .lock()
+                                                            .unwrap()
+                                                            .insert(addr.ip(), v);
 
-                                                    srv.data.ping = Some(v);
+                                                        srv.data.ping = Some(v);
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    debug!("Failed to ping {}: {}", addr, e);
                                                 }
                                             }
-                                            Err(e) => {
-                                                debug!("Failed to ping {}: {}", addr, e);
-                                            }
+                                            Ok(srv)
                                         }
-                                        Ok(srv)
-                                    }
-                                }))
-                            });
+                                    }))
+                                },
+                            );
                         }
                         FullParseResult::Error(e) => {
                             debug!(

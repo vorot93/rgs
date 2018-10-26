@@ -3,7 +3,6 @@ extern crate failure;
 extern crate futures;
 extern crate futures_timer;
 extern crate librgs;
-#[macro_use]
 extern crate log;
 extern crate rand;
 extern crate resolve;
@@ -14,6 +13,7 @@ use env_logger::Builder as EnvLogBuilder;
 use futures::prelude::*;
 use futures_timer::StreamExt;
 use librgs::models::*;
+use log::debug;
 use std::env;
 use std::sync::{Arc, Mutex};
 
@@ -62,10 +62,12 @@ fn main() {
                     debug!("{:?}", entry);
                     *total_queried.lock().unwrap() += 1;
                 }
-            }).map_err(|e| {
+            })
+            .map_err(|e| {
                 debug!("UdpQuery returned an error: {:?}", e);
                 e
-            }).timeout(timeout)
+            })
+            .timeout(timeout)
             .for_each(|_| Ok(()))
             .map(|_| ())
             .map_err(|_| ()),

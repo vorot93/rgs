@@ -4,7 +4,7 @@ pub mod openttds;
 pub mod q3m;
 pub mod q3s;
 
-use models::TProtocol;
+use crate::models::TProtocol;
 use std::collections::HashMap;
 
 pub fn make_default_protocols() -> HashMap<String, TProtocol> {

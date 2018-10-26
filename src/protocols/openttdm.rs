@@ -1,9 +1,10 @@
-use errors::Error;
-use models::*;
+use crate::errors::Error;
+use crate::models::*;
 
-use failure::Fallible;
+use failure::{format_err, Fallible};
 use futures;
 use openttd;
+use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -54,7 +55,8 @@ impl Protocol for ProtocolImpl {
                 master_server_version: MASTER_VERSION,
                 request_type: openttd::ServerListType::IPv4,
             })
-        }.to_bytes()
+        }
+        .to_bytes()
         .unwrap()
     }
 
@@ -71,14 +73,16 @@ impl Protocol for ProtocolImpl {
                         }))]
                     }
                     _ => vec![],
-                }.into_iter()
+                }
+                .into_iter()
                 .chain(data.into_iter().map(move |addr| {
                     Ok(ParseResult::FollowUp(FollowUpQuery {
                         host: Host::A(addr),
                         protocol: FollowUpQueryProtocol::Child(child.clone()),
                         state: None,
                     }))
-                })).collect::<Vec<_>>(),
+                }))
+                .collect::<Vec<_>>(),
             }))
         } else {
             Box::new(futures::stream::iter_ok(vec![]))

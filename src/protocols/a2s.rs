@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use models::{Packet, Protocol, ProtocolResultStream};
+use crate::models::{Packet, Protocol, ProtocolResultStream};
 
 #[derive(Debug)]
 pub struct A2SProtocol {}

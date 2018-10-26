@@ -1,10 +1,11 @@
-use errors::Error;
-use models::*;
+use crate::errors::Error;
+use crate::models::*;
 
-use failure;
+use failure::{self, format_err};
 use futures;
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;
+use log::debug;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -85,13 +86,15 @@ impl Sink for ResolverPipe {
                             history.lock().unwrap().insert(addr, s.host.clone());
                         }
                     }
-                }).map(|addr| {
+                })
+                .map(|addr| {
                     Some(ResolvedQuery {
                         addr,
                         protocol: query.protocol,
                         state: query.state,
                     })
-                }).or_else(|_e| Ok(None)),
+                })
+                .or_else(|_e| Ok(None)),
         ));
         Ok(AsyncSink::Ready)
     }
