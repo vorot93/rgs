@@ -1,7 +1,9 @@
-use librgs::models::*;
-use log::debug;
-use std::sync::{Arc, Mutex};
-use tokio::prelude::*;
+use {
+    librgs::models::*,
+    log::debug,
+    std::sync::{Arc, Mutex},
+    tokio::prelude::*,
+};
 
 fn main() {
     env_logger::init();

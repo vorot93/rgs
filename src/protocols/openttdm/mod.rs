@@ -1,13 +1,12 @@
-use crate::errors::Error;
-use crate::models::*;
+use crate::{errors::Error, models::*};
 
-use failure::{format_err, Fallible};
-use futures;
-use openttd;
-use serde::{Deserialize, Serialize};
-use serde_json::{self, Value};
-use std::collections::HashSet;
-use std::net::SocketAddr;
+use {
+    failure::{format_err, Fallible},
+    serde::{Deserialize, Serialize},
+    serde_json::Value,
+    std::collections::HashSet,
+    std::net::SocketAddr,
+};
 
 const MASTER_VERSION: u8 = 2;
 

@@ -1,16 +1,16 @@
-use crate::errors::Error;
-use crate::models::*;
+use crate::{errors::Error, models::*};
 
-use failure::{self, format_err};
-use futures;
-use futures::prelude::*;
-use futures::stream::FuturesUnordered;
-use log::debug;
-use serde_json::Value;
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use tokio_dns;
+use {
+    failure::format_err,
+    futures::{prelude::*, stream::FuturesUnordered},
+    log::debug,
+    serde_json::Value,
+    std::{
+        collections::HashMap,
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+    },
+};
 
 pub trait Resolver: Send + Sync + 'static {
     fn resolve(&self, host: Host) -> Box<Future<Item = SocketAddr, Error = failure::Error> + Send>;

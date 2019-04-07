@@ -1,16 +1,15 @@
-use crate::errors::Error;
-use crate::models::{
-    FollowUpQuery, FollowUpQueryProtocol, Packet, ParseResult, Protocol, ProtocolResultStream,
-    TProtocol,
+use crate::{
+    errors::Error,
+    models::{
+        FollowUpQuery, FollowUpQueryProtocol, Packet, ParseResult, Protocol, ProtocolResultStream,
+        TProtocol,
+    },
 };
 
-use failure::format_err;
-use futures;
-use futures::prelude::*;
-use q3a;
-use q3a::MasterQueryExtra::*;
-use serde_json::Value;
-use std::net::SocketAddr;
+use {
+    failure::format_err, futures::prelude::*, q3a::MasterQueryExtra::*, serde_json::Value,
+    std::net::SocketAddr,
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct ProtocolImpl {

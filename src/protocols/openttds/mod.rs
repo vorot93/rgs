@@ -1,11 +1,10 @@
-use crate::errors::Error;
-use crate::models::*;
+use crate::{errors::Error, models::*};
 
-use failure::{format_err, Fallible};
-use futures;
-use openttd;
-use serde_json::Value;
-use std::net::SocketAddr;
+use {
+    failure::{format_err, Fallible},
+    serde_json::Value,
+    std::net::SocketAddr,
+};
 
 fn write_v2_data(srv: &mut Server, v: openttd::V2Data) {
     srv.rules

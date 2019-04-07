@@ -1,9 +1,9 @@
-use failure;
-use futures::{future, prelude::*};
-use rand::random;
-use std::net::IpAddr;
-use std::time::Duration;
-use tokio_ping;
+use {
+    futures::{future, prelude::*},
+    rand::random,
+    std::net::IpAddr,
+    std::time::Duration,
+};
 
 pub trait Pinger: Send + Sync {
     fn ping(

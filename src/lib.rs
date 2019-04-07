@@ -4,33 +4,35 @@
 //! The `rgs` crate provides tools to asynchronously retrieve game server information like
 //! IP, server metadata, player list and more.
 
-use failure::{format_err, Fail, Fallible};
-use futures::{
-    empty,
-    future::ok,
-    prelude::*,
-    stream::{futures_unordered, FuturesUnordered},
-    sync::mpsc::UnboundedSender,
-};
-use log::{debug, trace};
-use std::collections::HashMap;
-use std::io;
-use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use tokio::net::{UdpFramed, UdpSocket};
-use tokio_codec::BytesCodec;
-
 pub mod dns;
-#[macro_use]
 pub mod errors;
 pub mod models;
-pub use self::models::*;
 pub mod ping;
 pub mod protocols;
 
-use self::dns::Resolver;
-use self::ping::Pinger;
+use {
+    core::time::Duration,
+    failure::{format_err, Fail, Fallible},
+    futures::{
+        empty,
+        future::ok,
+        prelude::*,
+        stream::{futures_unordered, FuturesUnordered},
+        sync::mpsc::UnboundedSender,
+    },
+    log::{debug, trace},
+    std::{
+        collections::HashMap,
+        io,
+        net::{IpAddr, SocketAddr},
+        sync::{Arc, Mutex},
+        time::Instant,
+    },
+    tokio::codec::BytesCodec,
+    tokio::net::{UdpFramed, UdpSocket},
+};
+
+use self::{dns::Resolver, models::*, ping::Pinger};
 
 type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, TProtocol>>>;
 

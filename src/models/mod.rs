@@ -1,21 +1,19 @@
-use derive_more::From;
-use failure;
-use futures::prelude::*;
-use iso_country::Country as CountryBase;
-use serde::{
-    de::{self, Visitor},
-    Deserialize, Deserializer, Serialize, Serializer,
-};
-use serde_json::{self, Value};
-use std::{
-    self,
-    collections::{BTreeMap, HashMap},
-    net::SocketAddr,
-    ops::Deref,
-    str::FromStr,
-    string::ToString,
-    sync::Arc,
-    time::Duration,
+use {
+    core::{hash::Hash, ops::Deref, str::FromStr, time::Duration},
+    derive_more::From,
+    futures::prelude::*,
+    iso_country::Country as CountryBase,
+    serde::{
+        de::{self, Visitor},
+        Deserialize, Deserializer, Serialize, Serializer,
+    },
+    serde_json::Value,
+    std::{
+        collections::{BTreeMap, HashMap},
+        net::SocketAddr,
+        string::ToString,
+        sync::Arc,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -24,7 +22,7 @@ pub struct ServerEntry {
     pub data: Server,
 }
 
-impl std::hash::Hash for ServerEntry {
+impl Hash for ServerEntry {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.data.addr.hash(state)
     }

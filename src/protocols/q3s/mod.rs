@@ -1,15 +1,19 @@
-use crate::errors::Error;
-use crate::models::{Packet, ParseResult, Player, Protocol, ProtocolResultStream, Server};
+use crate::{
+    errors::Error,
+    models::{Packet, ParseResult, Player, Protocol, ProtocolResultStream, Server},
+};
 
-use derive_more::From;
-use failure::{format_err, Fallible};
-use futures::stream::{empty, once};
-use q3a;
-use serde_json::Value;
-use std::{
-    collections::HashMap,
-    fmt::{self, Debug, Formatter},
-    sync::Arc,
+use {
+    derive_more::From,
+    failure::{format_err, Fallible},
+    futures::stream::{empty, once},
+    q3a,
+    serde_json::Value,
+    std::{
+        collections::HashMap,
+        fmt::{self, Debug, Formatter},
+        sync::Arc,
+    },
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
