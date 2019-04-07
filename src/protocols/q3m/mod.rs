@@ -7,7 +7,7 @@ use crate::{
 };
 
 use {
-    failure::format_err, futures::prelude::*, q3a::MasterQueryExtra::*, serde_json::Value,
+    failure::format_err, futures01::prelude::*, q3a::MasterQueryExtra::*, serde_json::Value,
     std::net::SocketAddr,
 };
 
@@ -34,7 +34,7 @@ impl Protocol for ProtocolImpl {
     /// Create a stream of parsed values out of incoming response.
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
         Box::new(
-            futures::stream::iter_result(
+            futures01::stream::iter_result(
                 match q3a::Packet::from_bytes(p.data.as_slice().into())
                     .map_err(|e| format_err!("{}", e))
                     .and_then(|(_, pkt)| match pkt {

@@ -6,7 +6,7 @@ use crate::{
 use {
     derive_more::From,
     failure::{format_err, Fallible},
-    futures::stream::{empty, once},
+    futures01::stream::{empty, once},
     q3a,
     serde_json::Value,
     std::{

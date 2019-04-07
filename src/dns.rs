@@ -2,7 +2,7 @@ use crate::{errors::Error, models::*};
 
 use {
     failure::format_err,
-    futures::{prelude::*, stream::FuturesUnordered},
+    futures01::{prelude::*, stream::FuturesUnordered},
     log::debug,
     serde_json::Value,
     std::{
@@ -22,7 +22,7 @@ where
 {
     fn resolve(&self, host: Host) -> Box<Future<Item = SocketAddr, Error = failure::Error> + Send> {
         match host {
-            Host::A(addr) => Box::new(futures::future::ok(addr)),
+            Host::A(addr) => Box::new(futures01::future::ok(addr)),
             Host::S(stringaddr) => Box::new(
                 tokio_dns::Resolver::resolve(self, &stringaddr.host)
                     .map_err(|e| e.into())
@@ -60,7 +60,7 @@ pub struct ResolverPipe {
 impl ResolverPipe {
     pub fn new(resolver: Arc<Resolver>, history: History) -> Self {
         let mut pending_requests = FuturesUnordered::new();
-        pending_requests.push(Box::new(futures::future::empty())
+        pending_requests.push(Box::new(futures01::future::empty())
             as Box<Future<Item = Option<ResolvedQuery>, Error = failure::Error> + Send>);
         Self {
             inner: resolver,

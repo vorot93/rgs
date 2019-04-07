@@ -61,7 +61,7 @@ impl Protocol for ProtocolImpl {
 
     fn parse_response(&self, pkt: Packet) -> ProtocolResultStream {
         if let Some(child) = self.child.clone() {
-            Box::new(futures::stream::iter_result(match parse_data(&pkt.data) {
+            Box::new(futures01::stream::iter_result(match parse_data(&pkt.data) {
                 Err(e) => vec![Err((Some(pkt), e))],
                 Ok((server_type, data)) => match server_type {
                     openttd::ServerListType::IPv4 => {
@@ -84,7 +84,7 @@ impl Protocol for ProtocolImpl {
                 .collect::<Vec<_>>(),
             }))
         } else {
-            Box::new(futures::stream::iter_ok(vec![]))
+            Box::new(futures01::stream::iter_ok(vec![]))
         }
     }
 }

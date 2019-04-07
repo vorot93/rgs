@@ -99,7 +99,7 @@ impl Protocol for ProtocolImpl {
     }
 
     fn parse_response(&self, pkt: Packet) -> ProtocolResultStream {
-        Box::new(futures::stream::iter_result(vec![parse_data(
+        Box::new(futures01::stream::iter_result(vec![parse_data(
             pkt.addr, &pkt.data,
         )
         .map(ParseResult::Output)
@@ -111,7 +111,7 @@ impl Protocol for ProtocolImpl {
 mod tests {
     use super::Protocol;
     use super::*;
-    use futures::prelude::*;
+    use futures01::prelude::*;
     use serde_json::json;
     use std::{collections::HashMap, str::FromStr};
 

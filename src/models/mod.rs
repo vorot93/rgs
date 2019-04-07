@@ -1,7 +1,7 @@
 use {
     core::{hash::Hash, ops::Deref, str::FromStr, time::Duration},
     derive_more::From,
-    futures::prelude::*,
+    futures01::prelude::*,
     iso_country::Country as CountryBase,
     serde::{
         de::{self, Visitor},

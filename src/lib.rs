@@ -13,7 +13,7 @@ pub mod protocols;
 use {
     core::time::Duration,
     failure::{format_err, Fail, Fallible},
-    futures::{
+    futures01::{
         empty,
         future::ok,
         prelude::*,
@@ -61,7 +61,7 @@ struct ParseMuxer {
 impl ParseMuxer {
     pub fn new() -> Self {
         Self {
-            results_stream: Some(Box::new(futures::stream::iter_ok(vec![]))),
+            results_stream: Some(Box::new(futures01::stream::iter_ok(vec![]))),
         }
     }
 }
@@ -96,7 +96,7 @@ impl Sink for ParseMuxer {
                 );
             }
             Err(e) => {
-                results_stream = Box::new(results_stream.chain(futures::stream::iter_ok(vec![
+                results_stream = Box::new(results_stream.chain(futures01::stream::iter_ok(vec![
                     FullParseResult::Error((None, e)),
                 ])))
             }
@@ -222,7 +222,7 @@ impl UdpQuery {
         let socket_stream =
             socket_stream.map_err(|e| failure::Error::from(e.context("Socket stream error")));
 
-        let (query_sink, query_stream) = futures::sync::mpsc::unbounded::<Query>();
+        let (query_sink, query_stream) = futures01::sync::mpsc::unbounded::<Query>();
         let query_stream =
             Box::new(query_stream.map_err(|_| format_err!("Query stream returned an error")));
 

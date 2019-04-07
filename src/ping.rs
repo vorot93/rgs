@@ -1,5 +1,5 @@
 use {
-    futures::{future, prelude::*},
+    futures01::{future, prelude::*},
     rand::random,
     std::net::IpAddr,
     std::time::Duration,
