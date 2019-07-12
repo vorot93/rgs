@@ -55,7 +55,7 @@ pub enum FullParseResult {
 }
 
 struct ParseMuxer {
-    results_stream: Option<Box<Stream<Item = FullParseResult, Error = failure::Error> + Send>>,
+    results_stream: Option<Box<dyn Stream<Item = FullParseResult, Error = failure::Error> + Send>>,
 }
 
 impl ParseMuxer {
@@ -144,19 +144,19 @@ impl From<IncomingPacket> for (TProtocol, Packet, Duration) {
     }
 }
 
-pub type PingerFuture = Box<Future<Item = ServerEntry, Error = failure::Error> + Send>;
+pub type PingerFuture = Box<dyn Future<Item = ServerEntry, Error = failure::Error> + Send>;
 
 /// Represents a single request by user to query the servers fed into sink.
 pub struct UdpQuery {
-    query_to_dns: Box<Future<Item = (), Error = failure::Error> + Send>,
-    dns_to_socket: Box<Future<Item = (), Error = failure::Error> + Send>,
-    socket_to_parser: Box<Future<Item = (), Error = failure::Error> + Send>,
+    query_to_dns: Box<dyn Future<Item = (), Error = failure::Error> + Send>,
+    dns_to_socket: Box<dyn Future<Item = (), Error = failure::Error> + Send>,
+    socket_to_parser: Box<dyn Future<Item = (), Error = failure::Error> + Send>,
 
-    parser_stream: Box<Stream<Item = FullParseResult, Error = failure::Error> + Send>,
+    parser_stream: Box<dyn Stream<Item = FullParseResult, Error = failure::Error> + Send>,
     input_sink: UnboundedSender<Query>,
     follow_up_sink: UnboundedSender<Query>,
 
-    pinger: Arc<Pinger>,
+    pinger: Arc<dyn Pinger>,
     pinger_cache: Arc<Mutex<HashMap<IpAddr, Duration>>>,
     pinger_stream: FuturesUnordered<PingerFuture>,
 }
@@ -164,8 +164,8 @@ pub struct UdpQuery {
 impl UdpQuery {
     fn new<D, P>(dns_resolver: D, pinger: P, socket: UdpSocket) -> Self
     where
-        D: Into<Arc<Resolver>>,
-        P: Into<Arc<Pinger>>,
+        D: Into<Arc<dyn Resolver>>,
+        P: Into<Arc<dyn Pinger>>,
     {
         let ping_mapping = Arc::new(Mutex::new(HashMap::<SocketAddr, Instant>::new()));
         let protocol_mapping = ProtocolMapping::default();
@@ -371,28 +371,28 @@ impl Stream for UdpQuery {
 
 /// It can be used to spawn multiple UdpQueries.
 pub struct UdpQueryBuilder {
-    pinger: Arc<Pinger>,
-    dns_resolver: Arc<Resolver>,
+    pinger: Arc<dyn Pinger>,
+    dns_resolver: Arc<dyn Resolver>,
 }
 
 impl Default for UdpQueryBuilder {
     fn default() -> Self {
         Self {
             pinger: Arc::new(ping::DummyPinger),
-            dns_resolver: Arc::new(tokio_dns::CpuPoolResolver::new(8)) as Arc<Resolver>,
+            dns_resolver: Arc::new(tokio_dns::CpuPoolResolver::new(8)) as Arc<dyn Resolver>,
         }
     }
 }
 
 impl UdpQueryBuilder {
-    pub fn with_dns_resolver(mut self, resolver: Arc<Resolver>) -> Self {
+    pub fn with_dns_resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
         self.dns_resolver = resolver;
         self
     }
 
     pub fn with_pinger<T>(mut self, pinger: T) -> Self
     where
-        T: Into<Arc<Pinger>>,
+        T: Into<Arc<dyn Pinger>>,
     {
         self.pinger = pinger.into();
         self

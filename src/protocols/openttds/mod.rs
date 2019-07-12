@@ -81,7 +81,7 @@ fn parse_server(addr: SocketAddr, info: openttd::ServerResponse) -> Fallible<Ser
 
 fn parse_data(addr: SocketAddr, buf: &[u8]) -> Fallible<Server> {
     let p = openttd::Packet::from_incoming_bytes(buf)
-        .map_err(|e| format_err!("{}", e))?
+        .map_err(|e| format_err!("{:?}", e))?
         .1;
 
     match p {

@@ -162,7 +162,7 @@ pub enum ParseResult {
 }
 
 pub type ProtocolResultStream =
-    Box<Stream<Item = ParseResult, Error = (Option<Packet>, failure::Error)> + Send>;
+    Box<dyn Stream<Item = ParseResult, Error = (Option<Packet>, failure::Error)> + Send>;
 
 /// Protocol defines a common way to communicate with queried servers of a single type.
 pub trait Protocol: std::fmt::Debug + Send + Sync + 'static {
@@ -174,11 +174,11 @@ pub trait Protocol: std::fmt::Debug + Send + Sync + 'static {
 
 #[derive(Clone, Debug)]
 pub struct TProtocol {
-    inner: Arc<Protocol>,
+    inner: Arc<dyn Protocol>,
 }
 
 impl Deref for TProtocol {
-    type Target = Arc<Protocol>;
+    type Target = Arc<dyn Protocol>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
@@ -196,7 +196,7 @@ where
 {
     fn from(v: T) -> Self {
         Self {
-            inner: Arc::new(v) as Arc<Protocol>,
+            inner: Arc::new(v) as Arc<dyn Protocol>,
         }
     }
 }

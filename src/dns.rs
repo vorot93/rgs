@@ -13,14 +13,20 @@ use {
 };
 
 pub trait Resolver: Send + Sync + 'static {
-    fn resolve(&self, host: Host) -> Box<Future<Item = SocketAddr, Error = failure::Error> + Send>;
+    fn resolve(
+        &self,
+        host: Host,
+    ) -> Box<dyn Future<Item = SocketAddr, Error = failure::Error> + Send>;
 }
 
 impl<T> Resolver for T
 where
     T: tokio_dns::Resolver + Send + Sync + 'static,
 {
-    fn resolve(&self, host: Host) -> Box<Future<Item = SocketAddr, Error = failure::Error> + Send> {
+    fn resolve(
+        &self,
+        host: Host,
+    ) -> Box<dyn Future<Item = SocketAddr, Error = failure::Error> + Send> {
         match host {
             Host::A(addr) => Box::new(futures01::future::ok(addr)),
             Host::S(stringaddr) => Box::new(
@@ -51,17 +57,20 @@ pub struct ResolvedQuery {
 }
 
 pub struct ResolverPipe {
-    inner: Arc<Resolver>,
+    inner: Arc<dyn Resolver>,
     history: History,
-    pending_requests:
-        FuturesUnordered<Box<Future<Item = Option<ResolvedQuery>, Error = failure::Error> + Send>>,
+    pending_requests: FuturesUnordered<
+        Box<dyn Future<Item = Option<ResolvedQuery>, Error = failure::Error> + Send>,
+    >,
 }
 
 impl ResolverPipe {
-    pub fn new(resolver: Arc<Resolver>, history: History) -> Self {
+    pub fn new(resolver: Arc<dyn Resolver>, history: History) -> Self {
         let mut pending_requests = FuturesUnordered::new();
         pending_requests.push(Box::new(futures01::future::empty())
-            as Box<Future<Item = Option<ResolvedQuery>, Error = failure::Error> + Send>);
+            as Box<
+                dyn Future<Item = Option<ResolvedQuery>, Error = failure::Error> + Send,
+            >);
         Self {
             inner: resolver,
             history,

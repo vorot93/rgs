@@ -48,7 +48,7 @@ fn main() {
             .for_each(|_| Ok(()))
             .map(|_| ())
             .map_err(|_| ()),
-    ) as Box<Future<Item = (), Error = ()> + Send>;
+    ) as Box<dyn Future<Item = (), Error = ()> + Send>;
 
     debug!("Starting reactor");
     tokio::run(task);

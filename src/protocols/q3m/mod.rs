@@ -36,7 +36,7 @@ impl Protocol for ProtocolImpl {
         Box::new(
             futures01::stream::iter_result(
                 match q3a::Packet::from_bytes(p.data.as_slice().into())
-                    .map_err(|e| format_err!("{}", e))
+                    .map_err(|e| format_err!("{:?}", e))
                     .and_then(|(_, pkt)| match pkt {
                         q3a::Packet::GetServersResponse(data) => {
                             Ok(match self.q3s_protocol.clone() {

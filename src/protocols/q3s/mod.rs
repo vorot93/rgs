@@ -87,7 +87,7 @@ fn parse_q3a_server(
     Ok(())
 }
 
-pub type ServerFilterFunc = Arc<Fn(Server) -> Option<Server> + Send + Sync + 'static>;
+pub type ServerFilterFunc = Arc<dyn Fn(Server) -> Option<Server> + Send + Sync + 'static>;
 
 #[derive(Clone, From)]
 pub struct ServerFilter(pub ServerFilterFunc);
@@ -143,7 +143,7 @@ impl Protocol for ProtocolImpl {
 
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
         match q3a::Packet::from_bytes(p.data.as_slice().into())
-            .map_err(|e| format_err!("{}", e))
+            .map_err(|e| format_err!("{:?}", e))
             .and_then(|(_, pkt)| match pkt {
                 q3a::Packet::StatusResponse(pkt) => {
                     let mut server = Server::new(p.addr);
