@@ -1,6 +1,6 @@
 use {
-    librgs::models::*,
     log::debug,
+    rgs::models::*,
     std::sync::{Arc, Mutex},
     tokio::prelude::*,
 };
@@ -8,7 +8,7 @@ use {
 fn main() {
     env_logger::init();
 
-    let pconfig = librgs::protocols::make_default_protocols();
+    let pconfig = rgs::protocols::make_default_protocols();
 
     let requests = vec![
         UserQuery {
@@ -32,7 +32,7 @@ fn main() {
     let total_queried = Arc::new(Mutex::new(0));
 
     let task = Box::new(
-        librgs::simple_udp_query(requests)
+        rgs::simple_udp_query(requests)
             .inspect({
                 let total_queried = total_queried.clone();
                 move |entry| {

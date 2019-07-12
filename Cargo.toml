@@ -14,7 +14,7 @@ keywords = [
 license = "MIT"
 
 [lib]
-name = "librgs"
+name = "rgs"
 path = "src/lib.rs"
 
 [[bin]]
