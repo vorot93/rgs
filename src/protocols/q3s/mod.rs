@@ -122,7 +122,7 @@ impl Default for ProtocolImpl {
                 (Rule::NeedPass, "g_needpass"),
                 (Rule::ServerName, "sv_hostname"),
             ]
-            .into_iter()
+            .iter()
             .map(|(rule, name)| (*rule, name.to_string()))
             .collect(),
             server_filter: From::from(Arc::new(Some) as ServerFilterFunc),
@@ -142,7 +142,7 @@ impl Protocol for ProtocolImpl {
     }
 
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
-        match q3a::Packet::from_bytes(p.data.as_slice().into())
+        match q3a::Packet::from_bytes(p.data.as_slice())
             .map_err(|e| format_err!("{:?}", e))
             .and_then(|(_, pkt)| match pkt {
                 q3a::Packet::StatusResponse(pkt) => {

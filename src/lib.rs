@@ -273,22 +273,18 @@ impl UdpQuery {
             pinger_stream,
         }
     }
-}
 
-impl Sink for UdpQuery {
-    type SinkItem = UserQuery;
-    type SinkError = failure::Error;
+    pub fn simple_query(input: Vec<UserQuery>) -> Self {
+        let query_builder = UdpQueryBuilder::default();
 
-    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        Ok(self.input_sink.start_send(item.into())?.map(|v| v.into()))
-    }
+        let socket = UdpSocket::bind(&"[::]:5678".parse().unwrap()).unwrap();
+        let mut q = query_builder.build(socket);
 
-    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        Ok(self.input_sink.poll_complete()?)
-    }
+        for entry in input {
+            q.input_sink.start_send(entry.into()).unwrap();
+        }
 
-    fn close(&mut self) -> Poll<(), Self::SinkError> {
-        Ok(self.input_sink.close()?)
+        q
     }
 }
 
@@ -401,17 +397,4 @@ impl UdpQueryBuilder {
     pub fn build(&self, socket: UdpSocket) -> UdpQuery {
         UdpQuery::new(self.dns_resolver.clone(), self.pinger.clone(), socket)
     }
-}
-
-pub fn simple_udp_query(input: Vec<UserQuery>) -> UdpQuery {
-    let query_builder = UdpQueryBuilder::default();
-
-    let socket = UdpSocket::bind(&"[::]:5678".parse().unwrap()).unwrap();
-    let mut q = query_builder.build(socket);
-
-    for entry in input {
-        q.start_send(entry).unwrap();
-    }
-
-    q
 }

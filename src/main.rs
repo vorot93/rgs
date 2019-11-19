@@ -32,7 +32,7 @@ fn main() {
     let total_queried = Arc::new(Mutex::new(0));
 
     let task = Box::new(
-        rgs::simple_udp_query(requests)
+        rgs::UdpQuery::simple_query(requests)
             .inspect({
                 let total_queried = total_queried.clone();
                 move |entry| {

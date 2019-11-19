@@ -30,7 +30,6 @@ impl Pinger for tokio_ping::Pinger {
     ) -> Box<dyn Future<Item = Option<Duration>, Error = failure::Error> + Send> {
         Box::new(
             self.ping(addr, random(), 0, Duration::from_secs(4))
-                .map(|rtt| rtt.map(|v| Duration::from_millis(v as u64)))
                 .map_err(failure::Error::from),
         )
     }

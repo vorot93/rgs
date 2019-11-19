@@ -35,7 +35,7 @@ impl Protocol for ProtocolImpl {
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
         Box::new(
             futures01::stream::iter_result(
-                match q3a::Packet::from_bytes(p.data.as_slice().into())
+                match q3a::Packet::from_bytes(p.data.as_slice())
                     .map_err(|e| format_err!("{:?}", e))
                     .and_then(|(_, pkt)| match pkt {
                         q3a::Packet::GetServersResponse(data) => {
