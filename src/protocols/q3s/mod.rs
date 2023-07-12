@@ -2,19 +2,17 @@ use crate::{
     errors::Error,
     models::{Packet, ParseResult, Player, Protocol, ProtocolResultStream, Server},
 };
-
-use {
-    derive_more::From,
-    failure::{format_err, Fallible},
-    futures01::stream::{empty, once},
-    q3a,
-    serde_json::Value,
-    std::{
-        collections::HashMap,
-        fmt::{self, Debug, Formatter},
-        sync::Arc,
-    },
+use anyhow::format_err;
+use derive_more::From;
+use futures::stream::empty;
+use q3a;
+use serde_json::Value;
+use std::{
+    collections::HashMap,
+    fmt::{self, Debug, Formatter},
+    sync::Arc,
 };
+use tokio_stream::once;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Rule {
@@ -43,7 +41,7 @@ fn parse_q3a_server(
     srv: &mut Server,
     pkt: q3a::StatusResponseData,
     rule_mapping: &HashMap<Rule, String>,
-) -> Fallible<()> {
+) -> anyhow::Result<()> {
     use self::Rule::*;
 
     let mut rules = pkt.info;
@@ -112,7 +110,7 @@ pub struct ProtocolImpl {
 impl Default for ProtocolImpl {
     fn default() -> Self {
         Self {
-            version: 68,
+            version: 71,
             rule_names: [
                 (Rule::Secure, "sv_punkbuster"),
                 (Rule::MaxClients, "sv_maxclients"),
@@ -153,18 +151,17 @@ impl Protocol for ProtocolImpl {
                     Ok((self.server_filter.0)(server).map(ParseResult::Output))
                 }
                 other => Err(format_err!("Wrong packet type: {:?}", other.get_type())
-                    .context(Error::DataParseError)
-                    .into()),
+                    .context(Error::DataParseError)),
             })
             .map_err({
                 let p = p.clone();
-                move |e| (Some(p.clone()), e)
+                move |e| (Some(p), e)
             }) {
             Ok(opt) => match opt {
-                Some(v) => Box::new(once(Ok(v))),
-                None => Box::new(empty()),
+                Some(v) => Box::pin(once(Ok(v))),
+                None => Box::pin(empty()),
             },
-            Err(e) => Box::new(once(Err(e))),
+            Err(e) => Box::pin(once(Err(e))),
         }
     }
 }

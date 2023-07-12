@@ -1,17 +1,17 @@
-use failure::Fail;
+use thiserror::Error;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum Error {
-    #[fail(display = "Null error")]
+    #[error("Null error")]
     NullError,
-    #[fail(display = "Data parse error")]
+    #[error("Data parse error")]
     DataParseError,
-    #[fail(display = "Network error")]
+    #[error("Network error")]
     NetworkError,
-    #[fail(display = "Invalid packet")]
+    #[error("Invalid packet")]
     InvalidPacketError,
-    #[fail(display = "Pipe error")]
+    #[error("Pipe error")]
     PipeError,
-    #[fail(display = "Operation timed out")]
+    #[error("Operation timed out")]
     TimeoutError,
 }

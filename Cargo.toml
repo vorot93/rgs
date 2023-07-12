@@ -2,15 +2,10 @@
 name = "rgs"
 version = "0.2.0"
 edition = "2018"
-authors = [
-    "Artem Vorotnikov <artem@vorotnikov.me>",
-]
+authors = ["Artem Vorotnikov <artem@vorotnikov.me>"]
 description = "Tool for querying game servers"
 repository = "https://github.com/vorot93/rgs"
-keywords = [
-    "game",
-    "games",
-]
+keywords = ["game", "games"]
 license = "MIT"
 
 [lib]
@@ -22,25 +17,26 @@ name = "rgs"
 path = "src/main.rs"
 
 [dependencies]
-byteorder = "*"
-chrono = "*"
-derive_more = "*"
-enum-primitive-derive = "*"
-env_logger = "*"
-failure = "*"
-failure_derive = "*"
-futures-preview = { version = "0.3.0-alpha.17", features = ["compat"] }
-futures01 = { version = "0.1", package = "futures" }
-iso_country = "*"
-log = "*"
-nom = "*"
-num-traits = "*"
-openttd = { git = "https://github.com/rust-game-parsers/openttd" }
-q3a = { git = "https://github.com/rust-game-parsers/q3a" }
-rand = "*"
-resolve = "*"
+anyhow = "1"
+byteorder = "1"
+bytes = "1"
+chrono = "0.4"
+derive_more = "0.99"
+enum-primitive-derive = "0.2"
+futures = "0.3"
+hex = "0.4"
+iso_country = "0.1"
+nom = "7"
+num-traits = "0.2"
+q3a = { git = "https://github.com/vorot93/q3a-packet-parsers" }
+rand = "0.8"
 serde = { version = "1", features = ["derive"] }
-serde_json = "*"
-tokio = "0.1"
-tokio-dns-unofficial = "*"
-tokio-ping = { git = "https://github.com/knsd/tokio-ping" }
+serde_json = "1"
+surge-ping = "0.8"
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["codec", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+trust-dns-resolver = "0.22"

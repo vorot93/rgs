@@ -5,17 +5,27 @@ use crate::{
         TProtocol,
     },
 };
+use anyhow::format_err;
+use futures::prelude::*;
+use q3a::MasterQueryExtra::*;
+use serde_json::Value;
+use std::net::SocketAddr;
 
-use {
-    failure::format_err, futures01::prelude::*, q3a::MasterQueryExtra::*, serde_json::Value,
-    std::net::SocketAddr,
-};
-
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ProtocolImpl {
     pub q3s_protocol: Option<TProtocol>,
     pub request_tag: Option<String>,
     pub version: u32,
+}
+
+impl Default for ProtocolImpl {
+    fn default() -> Self {
+        Self {
+            q3s_protocol: None,
+            request_tag: None,
+            version: 71,
+        }
+    }
 }
 
 impl Protocol for ProtocolImpl {
@@ -33,10 +43,10 @@ impl Protocol for ProtocolImpl {
     }
     /// Create a stream of parsed values out of incoming response.
     fn parse_response(&self, p: Packet) -> ProtocolResultStream {
-        Box::new(
-            futures01::stream::iter_result(
+        Box::pin(
+            futures::stream::iter(
                 match q3a::Packet::from_bytes(p.data.as_slice())
-                    .map_err(|e| format_err!("{:?}", e))
+                    .map_err(|e| format_err!("{e:?}"))
                     .and_then(|(_, pkt)| match pkt {
                         q3a::Packet::GetServersResponse(data) => {
                             Ok(match self.q3s_protocol.clone() {
@@ -57,8 +67,7 @@ impl Protocol for ProtocolImpl {
                             })
                         }
                         other => Err(format_err!("Wrong packet type: {:?}", other.get_type())
-                            .context(Error::DataParseError)
-                            .into()),
+                            .context(Error::DataParseError)),
                     }) {
                     Ok(servers) => servers.into_iter().map(Ok).collect(),
                     Err(e) => vec![Err(e)],

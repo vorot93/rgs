@@ -1,19 +1,20 @@
-use {
-    core::{hash::Hash, ops::Deref, str::FromStr, time::Duration},
-    derive_more::From,
-    futures01::prelude::*,
-    iso_country::Country as CountryBase,
-    serde::{
-        de::{self, Visitor},
-        Deserialize, Deserializer, Serialize, Serializer,
-    },
-    serde_json::Value,
-    std::{
-        collections::{BTreeMap, HashMap},
-        net::SocketAddr,
-        string::ToString,
-        sync::Arc,
-    },
+use derive_more::From;
+use futures::stream::BoxStream;
+use iso_country::Country as CountryBase;
+use serde::{
+    de::{self, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
+use serde_json::Value;
+use std::{
+    collections::{BTreeMap, HashMap},
+    hash::Hash,
+    net::SocketAddr,
+    ops::Deref,
+    str::FromStr,
+    string::ToString,
+    sync::Arc,
+    time::Duration,
 };
 
 #[derive(Clone, Debug)]
@@ -90,6 +91,7 @@ pub struct UserQuery {
     pub host: Host,
 }
 
+#[allow(clippy::vtable_address_comparisons)]
 impl PartialEq for UserQuery {
     fn eq(&self, other: &Self) -> bool {
         self.host == other.host && Arc::ptr_eq(&self.protocol, &other.protocol)
@@ -162,7 +164,7 @@ pub enum ParseResult {
 }
 
 pub type ProtocolResultStream =
-    Box<dyn Stream<Item = ParseResult, Error = (Option<Packet>, failure::Error)> + Send>;
+    BoxStream<'static, Result<ParseResult, (Option<Packet>, anyhow::Error)>>;
 
 /// Protocol defines a common way to communicate with queried servers of a single type.
 pub trait Protocol: std::fmt::Debug + Send + Sync + 'static {
@@ -184,9 +186,10 @@ impl Deref for TProtocol {
     }
 }
 
+#[allow(clippy::vtable_address_comparisons)]
 impl PartialEq for TProtocol {
     fn eq(&self, other: &TProtocol) -> bool {
-        Arc::ptr_eq(&*self, other)
+        Arc::ptr_eq(self, other)
     }
 }
 
@@ -247,17 +250,12 @@ impl<'de> Deserialize<'de> for Country {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Status {
+    #[default]
     Unspecified,
     Up,
     Down,
-}
-
-impl Default for Status {
-    fn default() -> Status {
-        Status::Unspecified
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -365,7 +363,7 @@ mod tests {
     fn serialization() {
         let (expectation, fixture) = fixtures();
 
-        let result = serde_json::to_value(&fixture).unwrap();
+        let result = serde_json::to_value(fixture).unwrap();
 
         assert_eq!(expectation, result);
     }

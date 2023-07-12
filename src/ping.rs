@@ -1,36 +1,27 @@
-use {
-    futures01::{future, prelude::*},
-    rand::random,
-    std::net::IpAddr,
-    std::time::Duration,
-};
+use futures::future::BoxFuture;
+use rand::random;
+use std::{future::ready, net::IpAddr, time::Duration};
+use surge_ping::PingIdentifier;
 
 pub trait Pinger: Send + Sync {
-    fn ping(
-        &self,
-        addr: IpAddr,
-    ) -> Box<dyn Future<Item = Option<Duration>, Error = failure::Error> + Send>;
+    fn ping(&self, addr: IpAddr) -> BoxFuture<'static, anyhow::Result<Option<Duration>>>;
 }
 
-pub struct DummyPinger;
-
-impl Pinger for DummyPinger {
-    fn ping(
-        &self,
-        _addr: IpAddr,
-    ) -> Box<dyn Future<Item = Option<Duration>, Error = failure::Error> + Send> {
-        Box::new(future::ok(None))
+impl Pinger for () {
+    fn ping(&self, _: IpAddr) -> BoxFuture<'static, anyhow::Result<Option<Duration>>> {
+        Box::pin(ready(Ok(None)))
     }
 }
 
-impl Pinger for tokio_ping::Pinger {
-    fn ping(
-        &self,
-        addr: IpAddr,
-    ) -> Box<dyn Future<Item = Option<Duration>, Error = failure::Error> + Send> {
-        Box::new(
-            self.ping(addr, random(), 0, Duration::from_secs(4))
-                .map_err(failure::Error::from),
-        )
+impl Pinger for surge_ping::Client {
+    fn ping(&self, addr: IpAddr) -> BoxFuture<'static, anyhow::Result<Option<Duration>>> {
+        let client = self.clone();
+
+        Box::pin(async move {
+            let mut pinger = client.pinger(addr, PingIdentifier(random())).await;
+            let (_, duration) = pinger.ping(0.into(), &[]).await?;
+
+            Ok(Some(duration))
+        })
     }
 }
