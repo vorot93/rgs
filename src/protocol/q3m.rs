@@ -23,11 +23,6 @@ impl Default for Q3m {
     }
 }
 
-/// Real masters terminate the (possibly multi-datagram) server list with `\EOT`.
-fn contains_eot(data: &[u8]) -> bool {
-    data.windows(4).any(|w| w == b"\\EOT")
-}
-
 impl Protocol for Q3m {
     fn make_request(&self) -> Vec<u8> {
         let mut out = Vec::new();
@@ -42,10 +37,13 @@ impl Protocol for Q3m {
     }
 
     fn parse_response(&self, _addr: SocketAddr, data: &[u8]) -> anyhow::Result<Parsed> {
-        let expect_more = !contains_eot(data);
         let (_, pkt) = q3a::Packet::from_bytes(data).map_err(|e| format_err!("{e:?}"))?;
         match pkt {
             q3a::Packet::GetServersResponse(resp) => {
+                // A master may split its server list across several datagrams;
+                // keep reading until the one carrying the `\EOT` terminator
+                // (`resp.eot`) arrives.
+                let expect_more = !resp.eot;
                 let outcomes = match self.q3s_protocol.clone() {
                     Some(q3s_protocol) => resp
                         .data
@@ -82,16 +80,16 @@ mod tests {
         "5.6.7.8:27950".parse().unwrap()
     }
 
-    /// A valid, terminated `getserversResponse` (q3a's writer omits the trailing
-    /// `\EOT` that its own parser requires, so append it).
-    fn getservers_response_bytes(addrs: &[SocketAddrV4]) -> Vec<u8> {
+    /// A `getserversResponse` carrying `addrs`. `eot` marks it as the master's
+    /// terminating datagram (q3a's writer emits the `\EOT` terminator when set).
+    fn getservers_response_bytes(addrs: &[SocketAddrV4], eot: bool) -> Vec<u8> {
         let mut out = Vec::new();
         q3a::Packet::GetServersResponse(q3a::GetServersResponseData {
             data: addrs.iter().copied().collect(),
+            eot,
         })
         .write_bytes(&mut out)
         .unwrap();
-        out.extend_from_slice(b"\\EOT");
         out
     }
 
@@ -122,7 +120,7 @@ mod tests {
         ];
 
         let parsed = proto
-            .parse_response(packet_addr(), &getservers_response_bytes(&addrs))
+            .parse_response(packet_addr(), &getservers_response_bytes(&addrs, true))
             .unwrap();
         // The terminating packet carries `\EOT`, so no more datagrams are expected.
         assert!(!parsed.expect_more);
@@ -152,7 +150,7 @@ mod tests {
         let proto = Q3m::default(); // q3s_protocol is None
         let addrs = [SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 27960)];
         let parsed = proto
-            .parse_response(packet_addr(), &getservers_response_bytes(&addrs))
+            .parse_response(packet_addr(), &getservers_response_bytes(&addrs, true))
             .unwrap();
         assert!(parsed.outcomes.is_empty());
     }
@@ -165,18 +163,22 @@ mod tests {
     }
 
     #[test]
-    fn parse_response_requires_eot_terminator() {
-        // q3a's parser needs the trailing `\EOT`; without it the datagram cannot
-        // be parsed, so `parse_response` returns an error.
-        let mut data = Vec::new();
-        q3a::Packet::GetServersResponse(q3a::GetServersResponseData {
-            data: [SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 27960)]
-                .into_iter()
-                .collect(),
-        })
-        .write_bytes(&mut data)
-        .unwrap();
-        // deliberately omit the `\EOT` terminator
-        assert!(Q3m::default().parse_response(packet_addr(), &data).is_err());
+    fn parse_response_partial_datagram_sets_expect_more() {
+        // A non-terminating datagram (eot = false) parses, yields its servers, and
+        // signals the engine to keep reading for the rest of the master's response.
+        let child: Arc<dyn Protocol> = Arc::new(q3s::Q3s::default());
+        let proto = Q3m {
+            q3s_protocol: Some(child),
+            ..Default::default()
+        };
+        let addrs = [SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 27960)];
+        let parsed = proto
+            .parse_response(packet_addr(), &getservers_response_bytes(&addrs, false))
+            .unwrap();
+        assert!(
+            parsed.expect_more,
+            "a non-EOT datagram must request more reads"
+        );
+        assert_eq!(parsed.outcomes.len(), 1);
     }
 }

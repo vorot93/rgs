@@ -69,15 +69,16 @@ fn status_response(name: &str, map: &str) -> Vec<u8> {
     out
 }
 
-/// Build a Quake III master `getserversResponse` datagram (with `\EOT`).
-fn getservers_response(addrs: &[SocketAddrV4]) -> Vec<u8> {
+/// Build a Quake III master `getserversResponse` datagram. `eot` marks it as the
+/// terminating packet (q3a's writer emits the `\EOT` terminator when set).
+fn getservers_response(addrs: &[SocketAddrV4], eot: bool) -> Vec<u8> {
     let mut out = Vec::new();
     q3a::Packet::GetServersResponse(q3a::GetServersResponseData {
         data: addrs.iter().copied().collect(),
+        eot,
     })
     .write_bytes(&mut out)
     .unwrap();
-    out.extend_from_slice(b"\\EOT");
     out
 }
 
@@ -181,8 +182,8 @@ async fn master_fans_out_to_per_server_queries() {
         })
         .collect();
 
-    // Fake master that hands out those two addresses.
-    let master_addr = spawn_echo_server(getservers_response(&v4s)).await;
+    // Fake master that hands out those two addresses in one terminating datagram.
+    let master_addr = spawn_echo_server(getservers_response(&v4s, true)).await;
 
     let client = Client::builder()
         .resolver(Arc::new(MockResolver {
@@ -282,5 +283,71 @@ async fn resolver_failure_is_yielded_as_error() {
     assert!(
         entries[0].is_err(),
         "resolver failure must be yielded as Err"
+    );
+}
+
+#[tokio::test]
+async fn master_response_split_across_datagrams_is_fully_read() {
+    // Four fake q3s game servers, handed out two-per-datagram by the master.
+    let a = spawn_echo_server(status_response("Server A", "q3dm1")).await;
+    let b = spawn_echo_server(status_response("Server B", "q3dm2")).await;
+    let c = spawn_echo_server(status_response("Server C", "q3dm3")).await;
+    let d = spawn_echo_server(status_response("Server D", "q3dm4")).await;
+
+    let v4 = |addr: SocketAddr| match addr {
+        SocketAddr::V4(v4) => v4,
+        SocketAddr::V6(_) => unreachable!("loopback bind is IPv4"),
+    };
+
+    // First datagram carries A, B and is NOT terminated (eot = false); the second
+    // carries C, D and ends with `\EOT`. The engine must read both before stopping.
+    let datagram1 = getservers_response(&[v4(a), v4(b)], false);
+    let datagram2 = getservers_response(&[v4(c), v4(d)], true);
+
+    // Fake master: reply to each query with the two datagrams, in order.
+    let master = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let master_addr = master.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 2048];
+        while let Ok((_, peer)) = master.recv_from(&mut buf).await {
+            let _ = master.send_to(&datagram1, peer).await;
+            let _ = master.send_to(&datagram2, peer).await;
+        }
+    });
+
+    let client = Client::builder()
+        .resolver(Arc::new(MockResolver {
+            table: HashMap::new(),
+        }))
+        .build();
+
+    let protocols = make_default_protocols();
+    let queries = vec![Query {
+        protocol: protocols["q3m"].clone(),
+        host: Host::Addr(master_addr),
+    }];
+
+    let entries = tokio::time::timeout(
+        Duration::from_secs(10),
+        client.query(queries).collect::<Vec<_>>(),
+    )
+    .await
+    .expect("query stream did not terminate");
+
+    // Every server from both datagrams must be queried, proving the engine kept
+    // reading past the un-terminated first datagram.
+    let mut names: Vec<String> = entries
+        .into_iter()
+        .map(|r| r.unwrap().server.name.unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec![
+            "Server A".to_string(),
+            "Server B".to_string(),
+            "Server C".to_string(),
+            "Server D".to_string(),
+        ]
     );
 }

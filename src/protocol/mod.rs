@@ -65,10 +65,10 @@ mod tests {
         let mut data = Vec::new();
         q3a::Packet::GetServersResponse(q3a::GetServersResponseData {
             data: ["10.0.0.1:27960".parse().unwrap()].into_iter().collect(),
+            eot: true,
         })
         .write_bytes(&mut data)
         .unwrap();
-        data.extend_from_slice(b"\\EOT");
 
         let parsed = q3m
             .parse_response("5.6.7.8:27950".parse().unwrap(), &data)
