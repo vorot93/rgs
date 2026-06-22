@@ -214,3 +214,73 @@ async fn master_fans_out_to_per_server_queries() {
     names.sort();
     assert_eq!(names, vec!["Server A".to_string(), "Server B".to_string()]);
 }
+
+#[tokio::test]
+async fn down_server_yields_no_entry_and_stream_terminates() {
+    // Claim a port, then drop the socket so nothing listens there.
+    let dead = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let dead_addr = dead.local_addr().unwrap();
+    drop(dead);
+
+    let client = Client::builder()
+        .resolver(Arc::new(MockResolver {
+            table: HashMap::new(),
+        }))
+        .timeout(Duration::from_millis(200))
+        .build();
+
+    let protocols = make_default_protocols();
+    let queries = vec![Query {
+        protocol: protocols["q3s"].clone(),
+        host: Host::Addr(dead_addr),
+    }];
+
+    let entries = tokio::time::timeout(
+        Duration::from_secs(10),
+        client.query(queries).collect::<Vec<_>>(),
+    )
+    .await
+    .expect("query stream did not terminate");
+
+    // A non-responding server is skipped (whether via recv timeout or an ICMP
+    // port-unreachable recv error): it must never produce a parsed server entry,
+    // and the stream must still drain to completion.
+    let server_entries = entries.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(
+        server_entries, 0,
+        "a down server must not yield a server entry"
+    );
+}
+
+#[tokio::test]
+async fn resolver_failure_is_yielded_as_error() {
+    // Empty resolver table => an unknown named host resolves to an error.
+    let client = Client::builder()
+        .resolver(Arc::new(MockResolver {
+            table: HashMap::new(),
+        }))
+        .build();
+
+    let protocols = make_default_protocols();
+    let queries = vec![Query {
+        protocol: protocols["q3s"].clone(),
+        host: Host::Named {
+            host: "no-such-host".to_string(),
+            port: 27960,
+        },
+    }];
+
+    let entries = tokio::time::timeout(
+        Duration::from_secs(10),
+        client.query(queries).collect::<Vec<_>>(),
+    )
+    .await
+    .expect("query stream did not terminate");
+
+    // A DNS/resolution failure is a hard failure: surfaced as exactly one Err item.
+    assert_eq!(entries.len(), 1);
+    assert!(
+        entries[0].is_err(),
+        "resolver failure must be yielded as Err"
+    );
+}

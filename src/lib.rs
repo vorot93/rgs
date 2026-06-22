@@ -46,7 +46,8 @@ impl Client {
         let resolver = self.resolver.clone();
         let pinger = self.pinger.clone();
         let timeout = self.timeout;
-        let sem = Arc::new(Semaphore::new(self.concurrency));
+        // max(1): a concurrency of 0 would deadlock the worklist (every acquire blocks forever).
+        let sem = Arc::new(Semaphore::new(self.concurrency.max(1)));
         let initial: Vec<Query> = queries.into_iter().collect();
 
         async_stream::stream! {
@@ -128,6 +129,11 @@ async fn run_query(
             }
         };
 
+        // A parse error is fatal to this query and surfaces as an `Err` item, per
+        // the spec's error policy. Any outcomes accumulated from earlier datagrams
+        // of a multi-datagram response are intentionally discarded. (With the
+        // current q3a parser a q3s/q3m response is always a single datagram, so no
+        // partial results are dropped in practice.)
         let parsed = query.protocol.parse_response(addr, &buf[..n])?;
         outcomes.extend(parsed.outcomes);
         if !parsed.expect_more {
