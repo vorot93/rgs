@@ -46,6 +46,7 @@ pub struct ServerEntry {
 pub struct Player {
     pub name: String,
     pub ping: Option<i64>,
+    #[serde(default)]
     pub info: serde_json::Map<String, Value>,
 }
 
@@ -151,5 +152,28 @@ mod tests {
             serde_json::from_value(serde_json::to_value(srv.clone()).unwrap()).unwrap();
 
         assert_eq!(roundtripped, srv);
+    }
+
+    #[test]
+    fn player_info_defaults_when_missing_and_roundtrips_when_present() {
+        // A Player JSON omitting `info` must deserialize (empty map), not error.
+        let sparse: Player = serde_json::from_value(serde_json::json!({
+            "name": "bob",
+            "ping": null
+        }))
+        .unwrap();
+        assert!(sparse.info.is_empty());
+
+        // A non-empty `info` survives a round-trip.
+        let mut player = Player {
+            name: "carol".to_string(),
+            ping: Some(15),
+            ..Default::default()
+        };
+        player.info.insert("score".to_string(), serde_json::Value::from(42));
+        let roundtripped: Player =
+            serde_json::from_value(serde_json::to_value(player.clone()).unwrap()).unwrap();
+        assert_eq!(roundtripped, player);
+        assert_eq!(roundtripped.info.get("score"), Some(&serde_json::Value::from(42)));
     }
 }
