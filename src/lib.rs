@@ -11,7 +11,6 @@ pub mod ping;
 pub mod protocols;
 
 use crate::{dns::Resolver, models::*, ping::Pinger};
-use bytes::Bytes;
 use futures::{
     future::{BoxFuture, ok},
     prelude::*,
@@ -44,6 +43,19 @@ fn to_v4(addr: SocketAddr) -> SocketAddr {
     }
 
     addr
+}
+
+/// Rewrites an IPv4 destination as a v4-mapped IPv6 address.
+///
+/// The query socket is bound to `[::]` (IPv6), but game-server addresses are
+/// IPv4. macOS rejects sending an IPv4 destination from an IPv6 socket with
+/// `EINVAL`, so IPv4 destinations must be sent in their v4-mapped IPv6 form.
+fn to_mapped_v6(addr: SocketAddr) -> SocketAddr {
+    if let SocketAddr::V4(v4) = addr {
+        SocketAddr::new(IpAddr::V6(v4.ip().to_ipv6_mapped()), v4.port())
+    } else {
+        addr
+    }
 }
 
 pub enum FullParseResult {
@@ -172,10 +184,12 @@ impl UdpQuery {
         let protocol_mapping = ProtocolMapping::default();
         let dns_history = dns::History::default();
 
-        let (socket_sink, socket_stream) =
-            UdpFramed::new(socket, BytesCodec::new()).split::<(Bytes, _)>();
+        let socket = Arc::new(socket);
+        let socket_is_ipv6 = socket.local_addr().map(|a| a.is_ipv6()).unwrap_or(false);
 
-        let socket_stream = socket_stream
+        // Receive side only: the send side bypasses the framed sink and uses the
+        // raw socket, so a failed `send_to` cannot wedge or panic the pipeline.
+        let socket_stream = UdpFramed::new(socket.clone(), BytesCodec::new())
             .map_ok({
                 let ping_mapping = ping_mapping.clone();
                 let protocol_mapping = protocol_mapping.clone();
@@ -219,8 +233,6 @@ impl UdpQuery {
             })
             .map_err(anyhow::Error::from);
 
-        let socket_sink =
-            socket_sink.sink_map_err(|e| anyhow::Error::from(e).context("Socket sink error"));
         let socket_stream = socket_stream.map_err(|e| e.context("Socket stream error"));
 
         let (query_sink, query_stream) = tokio::sync::mpsc::unbounded_channel::<Query>();
@@ -235,29 +247,52 @@ impl UdpQuery {
         let parser_stream = Box::pin(parser_stream);
         let (dns_resolver_sink, dns_resolver_stream) = dns_resolver.split();
 
-        let dns_resolver_stream = dns_resolver_stream.map({
+        let mut dns_resolver_stream = dns_resolver_stream.map({
             move |v| {
                 let data = v.protocol.make_request(v.state);
                 trace!("Sending data to {}: {}", v.addr, hex::encode(&data));
                 protocol_mapping.lock().unwrap().insert(v.addr, v.protocol);
                 ping_mapping.lock().unwrap().insert(v.addr, Instant::now());
-                (data.into(), v.addr)
+                (data, v.addr)
             }
         });
 
-        // Outgoing pipe: Query Stream -> DNS Resolver -> UDP Socket
+        // Outgoing pipe: Query Stream -> DNS Resolver -> UDP Socket.
+        //
+        // Both outgoing driver futures are fused so that re-polling one after it
+        // has resolved yields `Pending` instead of panicking.
         let query_to_dns = Box::pin(
             query_stream
                 .map(Ok::<_, anyhow::Error>)
-                .forward(dns_resolver_sink),
+                .forward(dns_resolver_sink)
+                .fuse(),
         );
+        // Send datagrams over the raw socket. A failed `send_to` (e.g. an
+        // unreachable address) is logged and skipped rather than tearing down the
+        // pipeline; IPv4 destinations are sent v4-mapped on an IPv6 socket.
         let dns_to_socket = Box::pin(
-            dns_resolver_stream
-                .map(Ok::<_, anyhow::Error>)
-                .forward(socket_sink),
+            {
+                let socket = socket.clone();
+                async move {
+                    while let Some((data, addr)) = dns_resolver_stream.next().await {
+                        let dest = if socket_is_ipv6 {
+                            to_mapped_v6(addr)
+                        } else {
+                            addr
+                        };
+                        if let Err(e) = socket.send_to(&data, dest).await {
+                            debug!("Failed to send query to {addr}: {e}");
+                        }
+                    }
+                    Ok::<(), anyhow::Error>(())
+                }
+            }
+            .fuse(),
         );
 
-        // Incoming pipe: UDP Socket -> Parser
+        // Incoming pipe: UDP Socket -> Parser. The framed receive stream never
+        // ends, so this forward only ever yields `Pending` or surfaces a recv
+        // error and keeps going; re-polling it is already safe, so it is not fused.
         let socket_to_parser = Box::pin(socket_stream.forward(parser_sink));
 
         let pinger_cache = Default::default();

@@ -119,3 +119,55 @@ async fn udp_query_resolves_queries_and_parses_responses() {
     // Ping comes from the mock pinger, proving that stage ran.
     assert_eq!(entry.data.ping, Some(ping));
 }
+
+/// Regression test for the macOS `"polled MapErr after completion"` panic.
+///
+/// `simple_query` binds the query socket to `[::]` (IPv6), but game-server
+/// addresses (and the master that hands them out) are IPv4. On macOS, sending an
+/// IPv4 destination from an IPv6 socket fails with `EINVAL`; that error used to
+/// tear down the framed socket sink and crash the whole pipeline on the next
+/// poll. The pipeline must instead reach the IPv4 server and return its entry.
+#[tokio::test]
+async fn udp_query_reaches_ipv4_server_from_ipv6_socket() {
+    // Fake IPv4 game server on loopback.
+    let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let server_addr = server.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 2048];
+        while let Ok((_, peer)) = server.recv_from(&mut buf).await {
+            let _ = server
+                .send_to(&status_response("IPv4 Server", "q3dm6"), peer)
+                .await;
+        }
+    });
+
+    let ping = Duration::from_millis(7);
+    let resolver = Arc::new(MockResolver {
+        table: HashMap::from([("fakehost".to_string(), server_addr)]),
+    });
+
+    // Bind the query socket to IPv6, exactly like `simple_query` does.
+    let socket = UdpSocket::bind("[::]:0").await.unwrap();
+    assert!(socket.local_addr().unwrap().is_ipv6());
+    let mut query = UdpQueryBuilder::default()
+        .with_dns_resolver(resolver)
+        .with_pinger(Arc::new(MockPinger(ping)) as Arc<dyn Pinger>)
+        .build(socket);
+
+    let protocols = make_default_protocols();
+    assert!(query.queue(UserQuery {
+        protocol: protocols["q3s"].clone(),
+        host: Host::S(StringAddr {
+            host: "fakehost".to_string(),
+            port: server_addr.port(),
+        }),
+    }));
+
+    let entry = tokio::time::timeout(Duration::from_secs(5), query.next())
+        .await
+        .expect("timed out waiting for a server entry")
+        .expect("stream ended without yielding an entry")
+        .expect("query returned an error");
+    assert_eq!(entry.data.name.as_deref(), Some("IPv4 Server"));
+    assert_eq!(entry.data.ping, Some(ping));
+}
