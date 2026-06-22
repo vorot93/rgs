@@ -1,9 +1,5 @@
 use futures::StreamExt;
-use rgs::{
-    Client,
-    model::{Host, Query},
-    protocol::make_default_protocols,
-};
+use qgs::{Client, model::Host};
 use tracing::*;
 use tracing_subscriber::{EnvFilter, prelude::*};
 
@@ -15,24 +11,16 @@ async fn main() {
         .with(filter)
         .init();
 
-    let protocols = make_default_protocols();
-    let queries = vec![Query {
-        protocol: protocols["q3m"].clone(),
-        host: Host::Named {
-            host: "master.ioquake3.org".into(),
-            port: 27950,
-        },
-    }];
-
     let client = Client::builder().build();
-    let mut stream = std::pin::pin!(client.query(queries));
+    let host = Host::from(("master.ioquake3.org", 27950));
+    let mut stream = std::pin::pin!(client.query_master(None, host, true));
 
     let mut total_queried = 0u64;
     while let Some(res) = stream.next().await {
         match res {
-            Ok(entry) => {
+            Ok(server) => {
                 total_queried += 1;
-                info!("{entry:?}");
+                info!("{server:?}");
             }
             Err(e) => warn!("query returned an error: {e:?}"),
         }

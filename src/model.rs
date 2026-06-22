@@ -1,14 +1,12 @@
-use crate::protocol::Protocol;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, net::SocketAddr, sync::Arc, time::Duration};
-
-/// A request to query one host with one protocol.
-#[derive(Clone, Debug)]
-pub struct Query {
-    pub protocol: Arc<dyn Protocol>,
-    pub host: Host,
-}
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Debug, Formatter},
+    net::SocketAddr,
+    sync::Arc,
+    time::Duration,
+};
 
 /// Where to send a query: a resolved socket address, or a name + port to resolve.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,13 +31,6 @@ where
             port,
         }
     }
-}
-
-/// A queried server together with the protocol that produced it.
-#[derive(Clone, Debug)]
-pub struct ServerEntry {
-    pub protocol: Arc<dyn Protocol>,
-    pub server: Server,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -101,6 +92,30 @@ impl Server {
     }
 }
 
+/// Filter applied to each parsed server; returning `None` drops it.
+pub type ServerFilterFunc = Arc<dyn Fn(Server) -> Option<Server> + Send + Sync + 'static>;
+
+#[derive(Clone)]
+pub struct ServerFilter(pub ServerFilterFunc);
+
+impl From<ServerFilterFunc> for ServerFilter {
+    fn from(f: ServerFilterFunc) -> Self {
+        ServerFilter(f)
+    }
+}
+
+impl Default for ServerFilter {
+    fn default() -> Self {
+        ServerFilter(Arc::new(Some) as ServerFilterFunc)
+    }
+}
+
+impl Debug for ServerFilter {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "<ServerFilter>")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,12 +140,8 @@ mod tests {
     fn server_skips_none_optionals_when_serializing() {
         let value = serde_json::to_value(Server::new(addr())).unwrap();
         let obj = value.as_object().unwrap();
-
-        // Always-present fields.
         assert!(obj.contains_key("addr"));
         assert!(obj.contains_key("rules"));
-
-        // Optional fields left as None must be omitted entirely.
         for key in ["name", "need_pass", "map", "num_clients", "ping", "players"] {
             assert!(!obj.contains_key(key), "expected `{key}` to be skipped");
         }
@@ -150,13 +161,11 @@ mod tests {
 
         let roundtripped: Server =
             serde_json::from_value(serde_json::to_value(srv.clone()).unwrap()).unwrap();
-
         assert_eq!(roundtripped, srv);
     }
 
     #[test]
     fn player_info_defaults_when_missing_and_roundtrips_when_present() {
-        // A Player JSON omitting `info` must deserialize (empty map), not error.
         let sparse: Player = serde_json::from_value(serde_json::json!({
             "name": "bob",
             "ping": null
@@ -164,7 +173,6 @@ mod tests {
         .unwrap();
         assert!(sparse.info.is_empty());
 
-        // A non-empty `info` survives a round-trip.
         let mut player = Player {
             name: "carol".to_string(),
             ping: Some(15),
@@ -180,5 +188,11 @@ mod tests {
             roundtripped.info.get("score"),
             Some(&serde_json::Value::from(42))
         );
+    }
+
+    #[test]
+    fn default_server_filter_keeps_servers() {
+        let filter = ServerFilter::default();
+        assert!((filter.0)(Server::new(addr())).is_some());
     }
 }

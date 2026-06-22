@@ -1,52 +1,12 @@
 //! End-to-end tests of the query engine against local fake game servers.
 
+use futures::StreamExt;
+use qgs::{Client, model::Host};
 use std::{
-    collections::HashMap,
-    net::{IpAddr, SocketAddr, SocketAddrV4},
-    sync::Arc,
+    net::{SocketAddr, SocketAddrV4},
     time::Duration,
 };
-
-use futures::{
-    StreamExt,
-    future::{BoxFuture, ready},
-};
-use rgs::{
-    Client,
-    dns::Resolver,
-    model::{Host, Query},
-    ping::Pinger,
-    protocol::make_default_protocols,
-};
 use tokio::net::UdpSocket;
-
-/// Resolver backed by a static hostname -> address table.
-struct MockResolver {
-    table: HashMap<String, SocketAddr>,
-}
-
-impl Resolver for MockResolver {
-    fn resolve(&self, host: Host) -> BoxFuture<'static, anyhow::Result<SocketAddr>> {
-        let result = match host {
-            Host::Addr(addr) => Ok(addr),
-            Host::Named { host, .. } => self
-                .table
-                .get(&host)
-                .copied()
-                .ok_or_else(|| anyhow::anyhow!("unknown host {host}")),
-        };
-        Box::pin(ready(result))
-    }
-}
-
-/// Pinger that reports a fixed round-trip time without sending ICMP.
-struct MockPinger(Duration);
-
-impl Pinger for MockPinger {
-    fn ping(&self, _: IpAddr) -> BoxFuture<'static, anyhow::Result<Option<Duration>>> {
-        Box::pin(ready(Ok(Some(self.0))))
-    }
-}
 
 /// Build a Quake III `statusResponse` datagram.
 fn status_response(name: &str, map: &str) -> Vec<u8> {
@@ -69,7 +29,7 @@ fn status_response(name: &str, map: &str) -> Vec<u8> {
     out
 }
 
-/// Build a Quake III master `getserversResponse` datagram. `eot` marks it as the
+/// Build a Quake III master `getserversResponse` datagram. `eot` marks the
 /// terminating packet (q3a's writer emits the `\EOT` terminator when set).
 fn getservers_response(addrs: &[SocketAddrV4], eot: bool) -> Vec<u8> {
     let mut out = Vec::new();
@@ -83,7 +43,6 @@ fn getservers_response(addrs: &[SocketAddrV4], eot: bool) -> Vec<u8> {
 }
 
 /// Spawn a fake server on loopback that replies to every datagram with `reply`.
-/// Returns its bound address.
 async fn spawn_echo_server(reply: Vec<u8>) -> SocketAddr {
     let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let addr = server.local_addr().unwrap();
@@ -96,215 +55,92 @@ async fn spawn_echo_server(reply: Vec<u8>) -> SocketAddr {
     addr
 }
 
-#[tokio::test]
-async fn query_resolves_and_parses_q3s_response() {
-    let server_addr = spawn_echo_server(status_response("Test Server", "q3dm6")).await;
-
-    let ping = Duration::from_millis(123);
-    let client = Client::builder()
-        .resolver(Arc::new(MockResolver {
-            table: HashMap::from([("fakehost".to_string(), server_addr)]),
-        }))
-        .pinger(Arc::new(MockPinger(ping)) as Arc<dyn Pinger>)
-        .build();
-
-    let protocols = make_default_protocols();
-    let queries = vec![Query {
-        protocol: protocols["q3s"].clone(),
-        host: Host::Named {
-            host: "fakehost".to_string(),
-            port: server_addr.port(),
-        },
-    }];
-
-    // The stream drains on its own once the single query finishes; guard against
-    // a hang with an outer timeout.
-    let entries = tokio::time::timeout(
-        Duration::from_secs(10),
-        client.query(queries).collect::<Vec<_>>(),
-    )
-    .await
-    .expect("query stream did not terminate");
-
-    assert_eq!(entries.len(), 1);
-    let entry = entries.into_iter().next().unwrap().unwrap();
-    assert_eq!(entry.server.addr, server_addr);
-    assert_eq!(entry.server.name.as_deref(), Some("Test Server"));
-    assert_eq!(entry.server.map.as_deref(), Some("q3dm6"));
-    assert_eq!(entry.server.max_clients, Some(8));
-    // Ping comes from the mock pinger, proving that stage ran.
-    assert_eq!(entry.server.ping, Some(ping));
+fn v4(addr: SocketAddr) -> SocketAddrV4 {
+    match addr {
+        SocketAddr::V4(v4) => v4,
+        SocketAddr::V6(_) => unreachable!("loopback bind is IPv4"),
+    }
 }
 
-/// Regression guard for the old macOS IPv4-from-IPv6 `EINVAL` crash: the engine
-/// now binds each query socket to the target's own address family, so an IPv4
-/// server is always reachable.
+#[tokio::test]
+async fn query_server_parses_status_response() {
+    let server_addr = spawn_echo_server(status_response("Test Server", "q3dm6")).await;
+
+    let client = Client::builder().build();
+    let server = tokio::time::timeout(
+        Duration::from_secs(10),
+        client.query_server(None, Host::Addr(server_addr)),
+    )
+    .await
+    .expect("query did not finish")
+    .expect("query errored")
+    .expect("no server returned");
+
+    assert_eq!(server.addr, server_addr);
+    assert_eq!(server.name.as_deref(), Some("Test Server"));
+    assert_eq!(server.map.as_deref(), Some("q3dm6"));
+    assert_eq!(server.max_clients, Some(8));
+    assert!(
+        server.ping.is_some(),
+        "RTT must be measured from the UDP round-trip"
+    );
+}
+
+/// Regression guard for the macOS IPv4-from-IPv6 `EINVAL` crash (commit 18eeaa1):
+/// the default IPv4 socket must reach an IPv4 server.
 #[tokio::test]
 async fn reaches_ipv4_server() {
     let server_addr = spawn_echo_server(status_response("IPv4 Server", "q3dm6")).await;
     assert!(server_addr.is_ipv4());
 
-    let client = Client::builder()
-        .resolver(Arc::new(MockResolver {
-            table: HashMap::new(),
-        }))
-        .build();
-
-    let protocols = make_default_protocols();
-    let queries = vec![Query {
-        protocol: protocols["q3s"].clone(),
-        host: Host::Addr(server_addr),
-    }];
-
-    let entries = tokio::time::timeout(
+    let client = Client::builder().build();
+    let server = tokio::time::timeout(
         Duration::from_secs(10),
-        client.query(queries).collect::<Vec<_>>(),
+        client.query_server(None, Host::Addr(server_addr)),
     )
     .await
-    .expect("query stream did not terminate");
+    .expect("query did not finish")
+    .expect("query errored")
+    .expect("no server returned");
 
-    assert_eq!(entries.len(), 1);
-    let entry = entries.into_iter().next().unwrap().unwrap();
-    assert_eq!(entry.server.name.as_deref(), Some("IPv4 Server"));
+    assert_eq!(server.name.as_deref(), Some("IPv4 Server"));
 }
 
 #[tokio::test]
 async fn master_fans_out_to_per_server_queries() {
-    // Two fake q3s game servers.
     let a = spawn_echo_server(status_response("Server A", "q3dm1")).await;
     let b = spawn_echo_server(status_response("Server B", "q3dm2")).await;
+    let master_addr = spawn_echo_server(getservers_response(&[v4(a), v4(b)], true)).await;
 
-    let v4s: Vec<SocketAddrV4> = [a, b]
-        .iter()
-        .map(|addr| match addr {
-            SocketAddr::V4(v4) => *v4,
-            SocketAddr::V6(_) => unreachable!("loopback bind is IPv4"),
-        })
-        .collect();
-
-    // Fake master that hands out those two addresses in one terminating datagram.
-    let master_addr = spawn_echo_server(getservers_response(&v4s, true)).await;
-
-    let client = Client::builder()
-        .resolver(Arc::new(MockResolver {
-            table: HashMap::new(),
-        }))
-        .build();
-
-    let protocols = make_default_protocols();
-    let queries = vec![Query {
-        protocol: protocols["q3m"].clone(),
-        host: Host::Addr(master_addr),
-    }];
-
-    // The outer timeout also proves the stream terminates once work drains.
+    let client = Client::builder().build();
     let entries = tokio::time::timeout(
         Duration::from_secs(10),
-        client.query(queries).collect::<Vec<_>>(),
+        client
+            .query_master(None, Host::Addr(master_addr), true)
+            .collect::<Vec<_>>(),
     )
     .await
-    .expect("query stream did not terminate");
+    .expect("stream did not terminate");
 
-    let servers: Vec<_> = entries.into_iter().map(|r| r.unwrap()).collect();
-    assert_eq!(servers.len(), 2);
-
-    let mut names: Vec<String> = servers
-        .iter()
-        .map(|s| s.server.name.clone().unwrap())
+    let mut names: Vec<String> = entries
+        .into_iter()
+        .map(|r| r.unwrap().name.unwrap())
         .collect();
     names.sort();
     assert_eq!(names, vec!["Server A".to_string(), "Server B".to_string()]);
 }
 
 #[tokio::test]
-async fn down_server_yields_no_entry_and_stream_terminates() {
-    // Claim a port, then drop the socket so nothing listens there.
-    let dead = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let dead_addr = dead.local_addr().unwrap();
-    drop(dead);
-
-    let client = Client::builder()
-        .resolver(Arc::new(MockResolver {
-            table: HashMap::new(),
-        }))
-        .timeout(Duration::from_millis(200))
-        .build();
-
-    let protocols = make_default_protocols();
-    let queries = vec![Query {
-        protocol: protocols["q3s"].clone(),
-        host: Host::Addr(dead_addr),
-    }];
-
-    let entries = tokio::time::timeout(
-        Duration::from_secs(10),
-        client.query(queries).collect::<Vec<_>>(),
-    )
-    .await
-    .expect("query stream did not terminate");
-
-    // A non-responding server is skipped (whether via recv timeout or an ICMP
-    // port-unreachable recv error): it must never produce a parsed server entry,
-    // and the stream must still drain to completion.
-    let server_entries = entries.iter().filter(|r| r.is_ok()).count();
-    assert_eq!(
-        server_entries, 0,
-        "a down server must not yield a server entry"
-    );
-}
-
-#[tokio::test]
-async fn resolver_failure_is_yielded_as_error() {
-    // Empty resolver table => an unknown named host resolves to an error.
-    let client = Client::builder()
-        .resolver(Arc::new(MockResolver {
-            table: HashMap::new(),
-        }))
-        .build();
-
-    let protocols = make_default_protocols();
-    let queries = vec![Query {
-        protocol: protocols["q3s"].clone(),
-        host: Host::Named {
-            host: "no-such-host".to_string(),
-            port: 27960,
-        },
-    }];
-
-    let entries = tokio::time::timeout(
-        Duration::from_secs(10),
-        client.query(queries).collect::<Vec<_>>(),
-    )
-    .await
-    .expect("query stream did not terminate");
-
-    // A DNS/resolution failure is a hard failure: surfaced as exactly one Err item.
-    assert_eq!(entries.len(), 1);
-    assert!(
-        entries[0].is_err(),
-        "resolver failure must be yielded as Err"
-    );
-}
-
-#[tokio::test]
 async fn master_response_split_across_datagrams_is_fully_read() {
-    // Four fake q3s game servers, handed out two-per-datagram by the master.
     let a = spawn_echo_server(status_response("Server A", "q3dm1")).await;
     let b = spawn_echo_server(status_response("Server B", "q3dm2")).await;
     let c = spawn_echo_server(status_response("Server C", "q3dm3")).await;
     let d = spawn_echo_server(status_response("Server D", "q3dm4")).await;
 
-    let v4 = |addr: SocketAddr| match addr {
-        SocketAddr::V4(v4) => v4,
-        SocketAddr::V6(_) => unreachable!("loopback bind is IPv4"),
-    };
-
-    // First datagram carries A, B and is NOT terminated (eot = false); the second
-    // carries C, D and ends with `\EOT`. The engine must read both before stopping.
+    // First datagram (A, B) is NOT terminated; second (C, D) carries `\EOT`.
     let datagram1 = getservers_response(&[v4(a), v4(b)], false);
     let datagram2 = getservers_response(&[v4(c), v4(d)], true);
 
-    // Fake master: reply to each query with the two datagrams, in order.
     let master = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let master_addr = master.local_addr().unwrap();
     tokio::spawn(async move {
@@ -315,30 +151,19 @@ async fn master_response_split_across_datagrams_is_fully_read() {
         }
     });
 
-    let client = Client::builder()
-        .resolver(Arc::new(MockResolver {
-            table: HashMap::new(),
-        }))
-        .build();
-
-    let protocols = make_default_protocols();
-    let queries = vec![Query {
-        protocol: protocols["q3m"].clone(),
-        host: Host::Addr(master_addr),
-    }];
-
+    let client = Client::builder().build();
     let entries = tokio::time::timeout(
         Duration::from_secs(10),
-        client.query(queries).collect::<Vec<_>>(),
+        client
+            .query_master(None, Host::Addr(master_addr), true)
+            .collect::<Vec<_>>(),
     )
     .await
-    .expect("query stream did not terminate");
+    .expect("stream did not terminate");
 
-    // Every server from both datagrams must be queried, proving the engine kept
-    // reading past the un-terminated first datagram.
     let mut names: Vec<String> = entries
         .into_iter()
-        .map(|r| r.unwrap().server.name.unwrap())
+        .map(|r| r.unwrap().name.unwrap())
         .collect();
     names.sort();
     assert_eq!(
@@ -350,4 +175,125 @@ async fn master_response_split_across_datagrams_is_fully_read() {
             "Server D".to_string(),
         ]
     );
+}
+
+#[tokio::test]
+async fn down_server_yields_none() {
+    // Claim a port, then drop the socket so nothing listens there.
+    let dead = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let dead_addr = dead.local_addr().unwrap();
+    drop(dead);
+
+    let client = Client::builder()
+        .timeout(Duration::from_millis(200))
+        .build();
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        client.query_server(None, Host::Addr(dead_addr)),
+    )
+    .await
+    .expect("query did not finish")
+    .expect("query errored");
+
+    assert!(result.is_none(), "a down server must not yield a server");
+}
+
+#[tokio::test]
+async fn master_without_follow_up_yields_bare_addresses() {
+    let a: SocketAddrV4 = "10.0.0.1:27960".parse().unwrap();
+    let b: SocketAddrV4 = "10.0.0.2:27961".parse().unwrap();
+    let master_addr = spawn_echo_server(getservers_response(&[a, b], true)).await;
+
+    let client = Client::builder().build();
+    let entries = tokio::time::timeout(
+        Duration::from_secs(10),
+        client
+            .query_master(None, Host::Addr(master_addr), false)
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .expect("stream did not terminate");
+
+    let mut addrs: Vec<SocketAddr> = entries.iter().map(|r| r.as_ref().unwrap().addr).collect();
+    addrs.sort();
+    assert_eq!(addrs, vec![SocketAddr::V4(a), SocketAddr::V4(b)]);
+
+    // No getstatus is sent, so only the address is populated.
+    for r in &entries {
+        let s = r.as_ref().unwrap();
+        assert!(s.name.is_none());
+        assert!(s.players.is_none());
+        assert!(s.ping.is_none());
+    }
+}
+
+#[tokio::test]
+async fn master_follow_up_surfaces_per_server_parse_error_and_continues() {
+    // One healthy server, and one that replies with a wrong-type datagram
+    // (a getserversResponse where a statusResponse is expected). The wrong-type
+    // reply must surface as an Err item without aborting the run, so the healthy
+    // server still yields its Ok.
+    let good = spawn_echo_server(status_response("Healthy", "q3dm6")).await;
+    let bad = spawn_echo_server(getservers_response(&[], true)).await;
+
+    let master_addr = spawn_echo_server(getservers_response(&[v4(good), v4(bad)], true)).await;
+
+    let client = Client::builder().build();
+    let entries = tokio::time::timeout(
+        Duration::from_secs(10),
+        client
+            .query_master(None, Host::Addr(master_addr), true)
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .expect("stream did not terminate");
+
+    let oks: Vec<_> = entries.iter().filter(|r| r.is_ok()).collect();
+    let errs: Vec<_> = entries.iter().filter(|r| r.is_err()).collect();
+    assert_eq!(oks.len(), 1, "the healthy server must yield exactly one Ok");
+    assert_eq!(oks[0].as_ref().unwrap().name.as_deref(), Some("Healthy"));
+    assert_eq!(
+        errs.len(),
+        1,
+        "the wrong-type reply must yield exactly one Err"
+    );
+}
+
+/// RTT must reflect the network round-trip, not the consumer's pace. A consumer
+/// that stalls after the first result must not inflate later servers' pings:
+/// each response is timestamped the instant it arrives, regardless of when the
+/// consumer gets around to reading it. (Regression: the old single loop measured
+/// RTT only when it next polled the socket, so a slow consumer inflated every
+/// subsequent ping by its stall.)
+#[tokio::test]
+async fn ping_is_not_inflated_by_a_slow_consumer() {
+    let a = spawn_echo_server(status_response("Server A", "q3dm1")).await;
+    let b = spawn_echo_server(status_response("Server B", "q3dm2")).await;
+    let master_addr = spawn_echo_server(getservers_response(&[v4(a), v4(b)], true)).await;
+
+    let client = Client::builder().build();
+    let mut stream = std::pin::pin!(client.query_master(None, Host::Addr(master_addr), true));
+
+    // Take the first result, then stall the consumer far longer than any real
+    // loopback RTT before taking the second.
+    let first = tokio::time::timeout(Duration::from_secs(10), stream.next())
+        .await
+        .expect("timed out on first result")
+        .expect("stream ended early")
+        .expect("first result errored");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let second = tokio::time::timeout(Duration::from_secs(10), stream.next())
+        .await
+        .expect("timed out on second result")
+        .expect("stream ended early")
+        .expect("second result errored");
+
+    for server in [first, second] {
+        let ping = server.ping.expect("ping must be measured");
+        assert!(
+            ping < Duration::from_millis(100),
+            "ping {ping:?} for {:?} was inflated by the 500ms consumer stall",
+            server.name,
+        );
+    }
 }

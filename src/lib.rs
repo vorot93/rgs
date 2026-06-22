@@ -1,35 +1,34 @@
-//! Asynchronous utilities for querying game servers.
-//!
-//! The `rgs` crate provides tools to asynchronously retrieve game server
-//! information like IP, server metadata, player list and more.
+//! Asynchronous utilities for querying Quake 3 game servers.
 
 pub mod dns;
 pub mod model;
-pub mod ping;
-pub mod protocol;
+pub mod q3;
 
 use crate::{
-    dns::Resolver,
-    model::{Query, ServerEntry},
-    ping::Pinger,
-    protocol::Outcome,
+    model::{Host, Server, ServerFilter},
+    q3::Rule,
 };
-use futures::{Stream, StreamExt, stream::FuturesUnordered};
+use bimap::BiMap;
+use futures::Stream;
+use hickory_resolver::TokioResolver;
 use std::{
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    borrow::Cow,
+    collections::HashMap,
+    net::{Ipv4Addr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{net::UdpSocket, sync::Semaphore};
-use tracing::{debug, trace};
+use tokio::{net::UdpSocket, task::JoinHandle};
+use tracing::debug;
 
-/// A configured query engine.
+/// A configured Quake 3 query engine.
 #[derive(Clone)]
 pub struct Client {
-    resolver: Arc<dyn Resolver>,
-    pinger: Arc<dyn Pinger>,
-    concurrency: usize,
+    resolver: TokioResolver,
     timeout: Duration,
+    version: u32,
+    rule_names: Cow<'static, BiMap<Rule, String>>,
+    server_filter: ServerFilter,
 }
 
 impl Client {
@@ -37,172 +36,245 @@ impl Client {
         ClientBuilder::default()
     }
 
-    /// Run all `queries`, fanning out follow-ups, and yield each server as it is
-    /// found. The stream drains and ends once no work remains.
-    pub fn query(
+    /// Query a single server over one UDP socket.
+    ///
+    /// Returns `Ok(Some(server))` on success, `Ok(None)` if the server does not
+    /// respond within the timeout or the filter drops it, and `Err` on a parse
+    /// error. The round-trip time populates `Server::ping`.
+    pub async fn query_server(
         &self,
-        queries: impl IntoIterator<Item = Query>,
-    ) -> impl Stream<Item = anyhow::Result<ServerEntry>> {
+        socket: Option<UdpSocket>,
+        host: Host,
+    ) -> anyhow::Result<Option<Server>> {
+        let addr = dns::resolve(&self.resolver, host).await?;
+        let socket = bind_or(socket).await?;
+
+        let request = q3::make_getstatus();
+        let sent = Instant::now();
+        socket.send_to(&request, addr).await?;
+
+        let mut buf = vec![0u8; 65_536];
+        loop {
+            match tokio::time::timeout(self.timeout, socket.recv_from(&mut buf)).await {
+                Ok(Ok((n, src))) => {
+                    if src != addr {
+                        continue; // stray datagram from another peer
+                    }
+                    let rtt = sent.elapsed();
+                    let parsed = q3::parse_status_response(
+                        addr,
+                        &buf[..n],
+                        &self.rule_names,
+                        &self.server_filter,
+                    )?;
+                    return Ok(parsed.map(|mut s| {
+                        s.ping = Some(rtt);
+                        s
+                    }));
+                }
+                // An unconnected socket rarely surfaces ICMP errors; treat any
+                // recv error as the host being unreachable.
+                Ok(Err(e)) => {
+                    debug!("recv error from {addr}: {e}");
+                    return Ok(None);
+                }
+                // No response within the timeout: the server is down or silent.
+                Err(_) => return Ok(None),
+            }
+        }
+    }
+
+    /// Query a master server over one UDP socket, optionally following up each
+    /// listed server with a `getstatus`. Yields each server as its response
+    /// arrives.
+    ///
+    /// With `follow_up == false`, yields a bare `Server::new(addr)` per listed
+    /// address (no `getstatus` sent). With `follow_up == true`, yields fully
+    /// parsed servers. A per-server parse error is yielded as an `Err` item; the
+    /// run continues.
+    pub fn query_master(
+        &self,
+        socket: Option<UdpSocket>,
+        host: Host,
+        follow_up: bool,
+    ) -> impl Stream<Item = anyhow::Result<Server>> + 'static {
         let resolver = self.resolver.clone();
-        let pinger = self.pinger.clone();
         let timeout = self.timeout;
-        // max(1): a concurrency of 0 would deadlock the worklist (every acquire blocks forever).
-        let sem = Arc::new(Semaphore::new(self.concurrency.max(1)));
-        let initial: Vec<Query> = queries.into_iter().collect();
+        let version = self.version;
+        let rule_names = self.rule_names.clone();
+        let server_filter = self.server_filter.clone();
 
         async_stream::stream! {
-            let mut inflight = FuturesUnordered::new();
-            for q in initial {
-                inflight.push(run_query(q, resolver.clone(), pinger.clone(), sem.clone(), timeout));
-            }
+            let master_addr = match dns::resolve(&resolver, host).await {
+                Ok(a) => a,
+                Err(e) => {
+                    yield Err(e);
+                    return;
+                }
+            };
+            let socket = match bind_or(socket).await {
+                Ok(s) => s,
+                Err(e) => {
+                    yield Err(e);
+                    return;
+                }
+            };
+            let socket = Arc::new(socket);
 
-            while let Some(res) = inflight.next().await {
-                match res {
-                    Ok(run) => {
-                        for f in run.follow_ups {
-                            inflight.push(run_query(
-                                f,
-                                resolver.clone(),
-                                pinger.clone(),
-                                sem.clone(),
-                                timeout,
-                            ));
-                        }
-                        for entry in run.outputs {
-                            yield Ok(entry);
+            // Dedicated receiver: stamp each datagram the instant it arrives and
+            // forward it. Measuring RTT from this arrival time (rather than from
+            // when the main loop next polls the socket) keeps the ping free of
+            // parse, fan-out, and consumer-pacing delay. The channel is unbounded
+            // so receiving never blocks on a slow consumer.
+            let (tx, mut rx) =
+                tokio::sync::mpsc::unbounded_channel::<(Vec<u8>, SocketAddr, Instant)>();
+            let receiver = {
+                let socket = socket.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 65_536];
+                    loop {
+                        match socket.recv_from(&mut buf).await {
+                            Ok((n, src)) => {
+                                let recv_at = Instant::now();
+                                if tx.send((buf[..n].to_vec(), src, recv_at)).is_err() {
+                                    break; // the stream was dropped
+                                }
+                            }
+                            // An unconnected socket rarely surfaces ICMP errors;
+                            // a recv error ends reception (mirrors the old loop's
+                            // break), and the main loop stops when the channel
+                            // closes.
+                            Err(e) => {
+                                debug!("recv error: {e}");
+                                break;
+                            }
                         }
                     }
-                    Err(e) => yield Err(e),
+                })
+            };
+            // Abort the receiver when the stream ends or is dropped.
+            let _receiver = AbortOnDrop(receiver);
+
+            let request = q3::make_getservers(version);
+            if let Err(e) = socket.send_to(&request, master_addr).await {
+                yield Err(e.into());
+                return;
+            }
+
+            let mut pending: HashMap<SocketAddr, Instant> = HashMap::new();
+            let mut master_done = false;
+
+            loop {
+                if master_done && pending.is_empty() {
+                    break;
                 }
+
+                let (data, src, recv_at) = match tokio::time::timeout(timeout, rx.recv()).await {
+                    Ok(Some(item)) => item,
+                    // Channel closed (the receiver hit a socket error and stopped)
+                    // or the idle gap exceeded the timeout: stop reading.
+                    Ok(None) | Err(_) => break,
+                };
+
+                if src == master_addr && !master_done {
+                    match q3::parse_getservers_response(&data) {
+                        Ok((addrs, eot)) => {
+                            if eot {
+                                master_done = true;
+                            }
+                            for v4 in addrs {
+                                let sa = SocketAddr::V4(v4);
+                                if follow_up {
+                                    if pending.contains_key(&sa) {
+                                        continue;
+                                    }
+                                    let getstatus = q3::make_getstatus();
+                                    if let Err(e) = socket.send_to(&getstatus, sa).await {
+                                        debug!("failed to send getstatus to {sa}: {e}");
+                                        continue;
+                                    }
+                                    pending.insert(sa, Instant::now());
+                                } else {
+                                    yield Ok(Server::new(sa));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            // The master's response is unparseable: give up on it
+                            // but keep draining queried servers.
+                            master_done = true;
+                            yield Err(e);
+                        }
+                    }
+                } else if let Some(sent) = pending.remove(&src) {
+                    // recv_at was stamped on arrival, so this RTT excludes any
+                    // parse, fan-out, or consumer-pacing delay.
+                    let rtt = recv_at.saturating_duration_since(sent);
+                    match q3::parse_status_response(src, &data, &rule_names, &server_filter) {
+                        Ok(Some(mut server)) => {
+                            server.ping = Some(rtt);
+                            yield Ok(server);
+                        }
+                        Ok(None) => {}
+                        Err(e) => yield Err(e),
+                    }
+                }
+                // else: stray datagram from an unknown peer, ignore.
             }
         }
     }
 }
 
-/// The result of one `run_query`: emitted servers plus follow-up queries to run.
-struct Run {
-    outputs: Vec<ServerEntry>,
-    follow_ups: Vec<Query>,
+/// Aborts a spawned task when dropped, so the master receiver task never
+/// outlives the stream that owns it.
+struct AbortOnDrop(JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
-async fn run_query(
-    query: Query,
-    resolver: Arc<dyn Resolver>,
-    pinger: Arc<dyn Pinger>,
-    sem: Arc<Semaphore>,
-    timeout: Duration,
-) -> anyhow::Result<Run> {
-    // Held for this query's DNS + I/O; released when the function returns, before
-    // the caller pushes any follow-ups.
-    let _permit = sem.acquire().await.expect("semaphore is never closed");
-
-    let addr = resolver.resolve(query.host.clone()).await?;
-
-    // Bind a socket of the same address family as the target, so an IPv4 server
-    // is reached from an IPv4 socket (no v4-mapped-IPv6 workaround).
-    let bind: SocketAddr = if addr.is_ipv6() {
-        (Ipv6Addr::UNSPECIFIED, 0).into()
-    } else {
-        (Ipv4Addr::UNSPECIFIED, 0).into()
-    };
-    let socket = UdpSocket::bind(bind).await?;
-    socket.connect(addr).await?;
-
-    let request = query.protocol.make_request();
-    let sent = Instant::now();
-    socket.send(&request).await?;
-
-    let mut outcomes = Vec::new();
-    let mut buf = vec![0u8; 65_536];
-    loop {
-        let n = match tokio::time::timeout(timeout, socket.recv(&mut buf)).await {
-            Ok(Ok(n)) => n,
-            // Down server / ICMP port-unreachable on a connected socket: silently stop.
-            Ok(Err(e)) => {
-                debug!("recv error from {addr}: {e}");
-                break;
-            }
-            // No response within the timeout: silently stop.
-            Err(_) => {
-                trace!("query to {addr} timed out");
-                break;
-            }
-        };
-
-        // A parse error is fatal to this query and surfaces as an `Err` item, per
-        // the spec's error policy. Any outcomes accumulated from earlier datagrams
-        // of a multi-datagram response are intentionally discarded. (With the
-        // current q3a parser a q3s/q3m response is always a single datagram, so no
-        // partial results are dropped in practice.)
-        let parsed = query.protocol.parse_response(addr, &buf[..n])?;
-        outcomes.extend(parsed.outcomes);
-        if !parsed.expect_more {
-            break;
+/// Use the consumer's socket, or bind a default IPv4 socket.
+///
+/// IPv4 is deliberate: every q3 destination (the master and every server it
+/// lists) is IPv4, so an IPv4 socket reaches all of them and avoids the macOS
+/// "IPv4 destination from an IPv6 socket" `EINVAL` failure (see commit 18eeaa1).
+/// Never bind `[::]`; never v4-map destinations.
+async fn bind_or(socket: Option<UdpSocket>) -> anyhow::Result<UdpSocket> {
+    match socket {
+        Some(s) => Ok(s),
+        None => {
+            let bind: SocketAddr = (Ipv4Addr::UNSPECIFIED, 0).into();
+            Ok(UdpSocket::bind(bind).await?)
         }
     }
-
-    let rtt = sent.elapsed();
-    let mut outputs = Vec::new();
-    let mut follow_ups = Vec::new();
-    for outcome in outcomes {
-        match outcome {
-            Outcome::Server(mut server) => {
-                server.ping = Some(rtt);
-                if let Ok(Some(icmp)) = pinger.ping(addr.ip()).await {
-                    server.ping = Some(icmp);
-                }
-                outputs.push(ServerEntry {
-                    protocol: query.protocol.clone(),
-                    server,
-                });
-            }
-            Outcome::FollowUp(q) => follow_ups.push(q),
-        }
-    }
-
-    Ok(Run {
-        outputs,
-        follow_ups,
-    })
 }
 
 /// Builder for [`Client`].
 pub struct ClientBuilder {
-    resolver: Arc<dyn Resolver>,
-    pinger: Arc<dyn Pinger>,
-    concurrency: usize,
+    resolver: TokioResolver,
     timeout: Duration,
+    version: u32,
+    rule_names: Cow<'static, BiMap<Rule, String>>,
+    server_filter: ServerFilter,
 }
 
 impl Default for ClientBuilder {
     fn default() -> Self {
         Self {
-            resolver: Arc::new(
-                hickory_resolver::TokioResolver::builder_tokio()
-                    .unwrap()
-                    .build()
-                    .unwrap(),
-            ) as Arc<dyn Resolver>,
-            pinger: Arc::new(()),
-            concurrency: 256,
+            resolver: TokioResolver::builder_tokio().unwrap().build().unwrap(),
             timeout: Duration::from_secs(5),
+            version: 68,
+            rule_names: Cow::Borrowed(q3::default_rule_names()),
+            server_filter: ServerFilter::default(),
         }
     }
 }
 
 impl ClientBuilder {
-    pub fn resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
+    pub fn resolver(mut self, resolver: TokioResolver) -> Self {
         self.resolver = resolver;
-        self
-    }
-
-    pub fn pinger(mut self, pinger: impl Into<Arc<dyn Pinger>>) -> Self {
-        self.pinger = pinger.into();
-        self
-    }
-
-    pub fn concurrency(mut self, concurrency: usize) -> Self {
-        self.concurrency = concurrency;
         self
     }
 
@@ -211,12 +283,28 @@ impl ClientBuilder {
         self
     }
 
+    pub fn version(mut self, version: u32) -> Self {
+        self.version = version;
+        self
+    }
+
+    pub fn rule_names(mut self, rule_names: impl Into<BiMap<Rule, String>>) -> Self {
+        self.rule_names = Cow::Owned(rule_names.into());
+        self
+    }
+
+    pub fn server_filter(mut self, server_filter: ServerFilter) -> Self {
+        self.server_filter = server_filter;
+        self
+    }
+
     pub fn build(self) -> Client {
         Client {
             resolver: self.resolver,
-            pinger: self.pinger,
-            concurrency: self.concurrency,
             timeout: self.timeout,
+            version: self.version,
+            rule_names: self.rule_names,
+            server_filter: self.server_filter,
         }
     }
 }
