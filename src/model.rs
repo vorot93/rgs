@@ -170,10 +170,15 @@ mod tests {
             ping: Some(15),
             ..Default::default()
         };
-        player.info.insert("score".to_string(), serde_json::Value::from(42));
+        player
+            .info
+            .insert("score".to_string(), serde_json::Value::from(42));
         let roundtripped: Player =
             serde_json::from_value(serde_json::to_value(player.clone()).unwrap()).unwrap();
         assert_eq!(roundtripped, player);
-        assert_eq!(roundtripped.info.get("score"), Some(&serde_json::Value::from(42)));
+        assert_eq!(
+            roundtripped.info.get("score"),
+            Some(&serde_json::Value::from(42))
+        );
     }
 }

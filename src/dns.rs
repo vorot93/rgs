@@ -61,10 +61,7 @@ mod tests {
     #[tokio::test]
     async fn resolver_resolves_named_host() {
         let resolver = MockResolver {
-            table: HashMap::from([(
-                "example.com".to_string(),
-                "1.2.3.4:27960".parse().unwrap(),
-            )]),
+            table: HashMap::from([("example.com".to_string(), "1.2.3.4:27960".parse().unwrap())]),
         };
         let resolved = resolver
             .resolve(Host::from(("example.com", 27960)))

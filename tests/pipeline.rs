@@ -7,7 +7,10 @@ use std::{
     time::Duration,
 };
 
-use futures::{StreamExt, future::{BoxFuture, ready}};
+use futures::{
+    StreamExt,
+    future::{BoxFuture, ready},
+};
 use rgs::{
     Client,
     dns::Resolver,
@@ -47,10 +50,14 @@ impl Pinger for MockPinger {
 
 /// Build a Quake III `statusResponse` datagram.
 fn status_response(name: &str, map: &str) -> Vec<u8> {
-    let info = [("sv_hostname", name), ("mapname", map), ("sv_maxclients", "8")]
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+    let info = [
+        ("sv_hostname", name),
+        ("mapname", map),
+        ("sv_maxclients", "8"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
 
     let mut out = Vec::new();
     q3a::Packet::StatusResponse(q3a::StatusResponseData {
