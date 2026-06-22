@@ -1,3 +1,5 @@
+pub mod q3s;
+
 use crate::model::{Query, Server};
 use std::{fmt::Debug, net::SocketAddr};
 
