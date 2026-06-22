@@ -66,10 +66,10 @@ pub fn make_getstatus() -> Vec<u8> {
 }
 
 /// The `getservers` request datagram sent to a master server.
-pub fn make_getservers(version: u32) -> Vec<u8> {
+pub fn make_getservers(version: u32, request_tag: Option<String>) -> Vec<u8> {
     let mut out = Vec::new();
     q3a::Packet::GetServers(q3a::GetServersData {
-        request_tag: None,
+        request_tag,
         version,
         extra: vec![Empty, Full].into_iter().collect(),
     })
@@ -169,6 +169,44 @@ pub fn parse_status_response(
     }
 }
 
+/// Which master query a `Client` sends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MasterProtocol {
+    /// Plain `getservers` (IPv4 only).
+    #[default]
+    GetServers,
+    /// `getserversExt` (DarkPlaces/Dæmon; reuses `request_tag` as the gamename).
+    GetServersExt,
+}
+
+/// The `getserversExt` request datagram. `gamename` is required; we request
+/// IPv4 servers (the follow-up socket is IPv4-only).
+pub fn make_getservers_ext(gamename: &str, version: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    q3a::Packet::GetServersExt(q3a::GetServersExtData {
+        request_tag: gamename.to_string(),
+        version,
+        extra: vec![Empty, Full, Ipv4].into_iter().collect(),
+    })
+    .write_bytes(&mut out)
+    .unwrap();
+    out
+}
+
+/// Parse a `getserversExtResponse` into its addresses (IPv4 and IPv6) and the
+/// `eot` flag.
+///
+/// The Unvanquished master server prefixes the standard server-address payload
+/// with a `\0<index>\0<numpackets>\0<label>` header; `q3a` skips this header
+/// transparently inside `GetServersExtResponse`.
+pub fn parse_getservers_ext_response(data: &[u8]) -> anyhow::Result<(Vec<SocketAddr>, bool)> {
+    let (_, pkt) = q3a::Packet::from_bytes(data).map_err(|e| format_err!("{e:?}"))?;
+    match pkt {
+        q3a::Packet::GetServersExtResponse(resp) => Ok((resp.data.into_iter().collect(), resp.eot)),
+        other => Err(format_err!("Wrong packet type: {:?}", other.get_type())),
+    }
+}
+
 /// Parse a `getserversResponse` datagram into its server addresses and the `eot`
 /// (end-of-transmission) flag marking the master's final datagram.
 pub fn parse_getservers_response(data: &[u8]) -> anyhow::Result<(Vec<SocketAddrV4>, bool)> {
@@ -224,12 +262,21 @@ mod tests {
 
     #[test]
     fn make_getservers_includes_version_and_flags() {
-        let bytes = make_getservers(68);
+        let bytes = make_getservers(68, None);
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("getservers"), "request: {text:?}");
         assert!(text.contains("68"), "request: {text:?}");
         assert!(text.contains("empty"), "request: {text:?}");
         assert!(text.contains("full"), "request: {text:?}");
+    }
+
+    #[test]
+    fn make_getservers_includes_request_tag_when_present() {
+        let bytes = make_getservers(3, Some("Xonotic".to_string()));
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("getservers"), "request: {text:?}");
+        assert!(text.contains("Xonotic"), "request: {text:?}");
+        assert!(text.contains('3'), "request: {text:?}");
     }
 
     #[test]
@@ -330,7 +377,33 @@ mod tests {
 
     #[test]
     fn parse_getservers_response_rejects_wrong_packet_type() {
-        let data = make_getservers(68);
+        let data = make_getservers(68, None);
         assert!(parse_getservers_response(&data).is_err());
+    }
+
+    #[test]
+    fn make_getservers_ext_has_gamename_and_ipv4() {
+        let bytes = make_getservers_ext("Unvanquished", 86);
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("getserversExt"), "{text:?}");
+        assert!(text.contains("Unvanquished"), "{text:?}");
+        assert!(text.contains("86"), "{text:?}");
+        assert!(text.contains("ipv4"), "{text:?}");
+    }
+
+    #[test]
+    fn parse_getservers_ext_response_yields_addrs() {
+        use std::net::{Ipv4Addr, SocketAddrV4};
+        let v4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 27960));
+        let mut bytes = Vec::new();
+        q3a::Packet::GetServersExtResponse(q3a::GetServersExtResponseData {
+            data: [v4].into_iter().collect(),
+            eot: true,
+        })
+        .write_bytes(&mut bytes)
+        .unwrap();
+        let (addrs, eot) = parse_getservers_ext_response(&bytes).unwrap();
+        assert!(eot);
+        assert_eq!(addrs, vec![v4]);
     }
 }

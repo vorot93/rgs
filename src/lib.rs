@@ -14,7 +14,7 @@ use hickory_resolver::TokioResolver;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
-    net::{Ipv4Addr, SocketAddr},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -29,6 +29,8 @@ pub struct Client {
     version: u32,
     rule_names: Cow<'static, BiMap<Rule, String>>,
     server_filter: ServerFilter,
+    request_tag: Option<String>,
+    master_protocol: q3::MasterProtocol,
 }
 
 impl Client {
@@ -107,6 +109,8 @@ impl Client {
         let resolver = self.resolver.clone();
         let timeout = self.timeout;
         let version = self.version;
+        let request_tag = self.request_tag.clone();
+        let master_protocol = self.master_protocol;
         let rule_names = self.rule_names.clone();
         let server_filter = self.server_filter.clone();
 
@@ -153,7 +157,12 @@ impl Client {
             // successful resolve + send; a failure yields an Err and is skipped.
             // Masters are deduped by resolved address so `getservers` is never
             // sent to the same master twice.
-            let request = q3::make_getservers(version);
+            let request = match master_protocol {
+                q3::MasterProtocol::GetServers => q3::make_getservers(version, request_tag),
+                q3::MasterProtocol::GetServersExt => {
+                    q3::make_getservers_ext(request_tag.as_deref().unwrap_or_default(), version)
+                }
+            };
             let mut masters_state: HashMap<SocketAddr, MasterQueryState> = HashMap::new();
             for host in masters {
                 let addr = match dns::resolve(&resolver, host).await {
@@ -194,7 +203,23 @@ impl Client {
                 };
 
                 if let Some(state) = masters_state.get_mut(&src) {
-                    match q3::parse_getservers_response(&data) {
+                    let parsed: anyhow::Result<(Vec<SocketAddrV4>, bool)> = match master_protocol {
+                        q3::MasterProtocol::GetServers => q3::parse_getservers_response(&data)
+                            .map(|(addrs, eot)| (addrs.into_iter().collect(), eot)),
+                        q3::MasterProtocol::GetServersExt => {
+                            q3::parse_getservers_ext_response(&data).map(|(addrs, eot)| {
+                                let v4 = addrs
+                                    .into_iter()
+                                    .filter_map(|a| match a {
+                                        SocketAddr::V4(v4) => Some(v4),
+                                        SocketAddr::V6(_) => None,
+                                    })
+                                    .collect();
+                                (v4, eot)
+                            })
+                        }
+                    };
+                    match parsed {
                         Ok((addrs, eot)) => {
                             if eot {
                                 *state = MasterQueryState::Done;
@@ -287,6 +312,8 @@ pub struct ClientBuilder {
     version: u32,
     rule_names: Cow<'static, BiMap<Rule, String>>,
     server_filter: ServerFilter,
+    request_tag: Option<String>,
+    master_protocol: q3::MasterProtocol,
 }
 
 impl Default for ClientBuilder {
@@ -297,6 +324,8 @@ impl Default for ClientBuilder {
             version: 68,
             rule_names: Cow::Borrowed(q3::default_rule_names()),
             server_filter: ServerFilter::default(),
+            request_tag: None,
+            master_protocol: q3::MasterProtocol::default(),
         }
     }
 }
@@ -327,6 +356,16 @@ impl ClientBuilder {
         self
     }
 
+    pub fn request_tag(mut self, request_tag: Option<String>) -> Self {
+        self.request_tag = request_tag;
+        self
+    }
+
+    pub fn master_protocol(mut self, master_protocol: q3::MasterProtocol) -> Self {
+        self.master_protocol = master_protocol;
+        self
+    }
+
     pub fn build(self) -> Client {
         Client {
             resolver: self.resolver,
@@ -334,6 +373,8 @@ impl ClientBuilder {
             version: self.version,
             rule_names: self.rule_names,
             server_filter: self.server_filter,
+            request_tag: self.request_tag,
+            master_protocol: self.master_protocol,
         }
     }
 }
