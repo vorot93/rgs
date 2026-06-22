@@ -18,3 +18,19 @@ impl Protocol for A2SProtocol {
         unimplemented!()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn make_request_builds_a2s_info_query() {
+        let mut expected = vec![4, 4, 4, 4];
+        expected.extend_from_slice(b"TSource Engine Query");
+        expected.push(0);
+
+        assert_eq!(A2SProtocol {}.make_request(None), expected);
+    }
+
+    // NOTE: `parse_response` is unimplemented; add coverage when the A2S parser lands.
+}

@@ -375,4 +375,151 @@ mod tests {
 
         assert_eq!(expectation, result);
     }
+
+    #[derive(Debug)]
+    struct DummyProtocol;
+
+    impl Protocol for DummyProtocol {
+        fn make_request(&self, _: Option<Value>) -> Vec<u8> {
+            Vec::new()
+        }
+        fn parse_response(&self, _: Packet) -> ProtocolResultStream {
+            Box::pin(futures::stream::empty())
+        }
+    }
+
+    fn addr() -> SocketAddr {
+        SocketAddr::from_str("127.0.0.1:27960").unwrap()
+    }
+
+    #[test]
+    fn country_serializes_to_iso_code() {
+        assert_eq!(
+            serde_json::to_value(Country(CountryBase::RU)).unwrap(),
+            json!("RU")
+        );
+        // The unspecified country has no ISO code, so it serializes to an empty string.
+        assert_eq!(serde_json::to_value(Country::default()).unwrap(), json!(""));
+    }
+
+    #[test]
+    fn country_deserializes_known_and_unknown_codes() {
+        let known: Country = serde_json::from_value(json!("RU")).unwrap();
+        assert_eq!(known, Country(CountryBase::RU));
+
+        // Unknown / garbage codes fall back to Unspecified rather than erroring.
+        let unknown: Country = serde_json::from_value(json!("not-a-code")).unwrap();
+        assert_eq!(unknown, Country::default());
+    }
+
+    #[test]
+    fn host_from_conversions() {
+        assert_eq!(Host::from(addr()), Host::A(addr()));
+
+        assert_eq!(
+            Host::from(("example.com", 27960)),
+            Host::S(StringAddr {
+                host: "example.com".to_string(),
+                port: 27960,
+            })
+        );
+    }
+
+    #[test]
+    fn query_userquery_roundtrip() {
+        let protocol = TProtocol::from(DummyProtocol);
+        let user = UserQuery {
+            protocol: protocol.clone(),
+            host: Host::A(addr()),
+        };
+
+        let query = Query::from(user.clone());
+        assert_eq!(query.host, Host::A(addr()));
+        assert!(query.state.is_none());
+
+        // Converting back drops the state and reproduces the original UserQuery.
+        assert_eq!(UserQuery::from(query), user);
+    }
+
+    #[test]
+    fn tprotocol_equality_is_pointer_identity() {
+        let a = TProtocol::from(DummyProtocol);
+        let b = a.clone();
+        let c = TProtocol::from(DummyProtocol);
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn userquery_equality_uses_host_and_protocol_identity() {
+        let protocol = TProtocol::from(DummyProtocol);
+        let other_protocol = TProtocol::from(DummyProtocol);
+
+        let base = UserQuery {
+            protocol: protocol.clone(),
+            host: Host::A(addr()),
+        };
+
+        assert_eq!(
+            base,
+            UserQuery {
+                protocol: protocol.clone(),
+                host: Host::A(addr()),
+            }
+        );
+
+        // Different protocol instance => not equal.
+        assert_ne!(
+            base,
+            UserQuery {
+                protocol: other_protocol,
+                host: Host::A(addr()),
+            }
+        );
+
+        // Different host => not equal.
+        assert_ne!(
+            base,
+            UserQuery {
+                protocol,
+                host: Host::from(("example.com", 27960)),
+            }
+        );
+    }
+
+    #[test]
+    fn server_skips_none_optionals_when_serializing() {
+        let value = serde_json::to_value(Server::new(addr())).unwrap();
+        let obj = value.as_object().unwrap();
+
+        // Mandatory fields are always present.
+        assert!(obj.contains_key("addr"));
+        assert!(obj.contains_key("status"));
+        assert!(obj.contains_key("country"));
+        assert!(obj.contains_key("rules"));
+
+        // Optional fields left as None must be omitted entirely.
+        for key in ["name", "need_pass", "map", "num_clients", "ping", "players"] {
+            assert!(!obj.contains_key(key), "expected `{key}` to be skipped");
+        }
+    }
+
+    #[test]
+    fn server_roundtrips_optional_fields() {
+        let mut srv = Server::new(addr());
+        srv.name = Some("Test Server".to_string());
+        srv.map = Some("q3dm6".to_string());
+        srv.ping = Some(Duration::from_millis(42));
+        srv.players = Some(vec![Player {
+            name: "player1".to_string(),
+            ping: Some(20),
+            ..Default::default()
+        }]);
+
+        let roundtripped: Server =
+            serde_json::from_value(serde_json::to_value(srv.clone()).unwrap()).unwrap();
+
+        assert_eq!(roundtripped, srv);
+    }
 }

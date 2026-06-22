@@ -165,3 +165,118 @@ impl Protocol for ProtocolImpl {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::StreamExt;
+    use std::net::SocketAddr;
+
+    fn addr() -> SocketAddr {
+        "1.2.3.4:27960".parse().unwrap()
+    }
+
+    fn status_response_bytes(info: &[(&str, &str)], players: Vec<q3a::Player>) -> Vec<u8> {
+        let mut out = Vec::new();
+        q3a::Packet::StatusResponse(q3a::StatusResponseData {
+            info: info
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            players,
+        })
+        .write_bytes(&mut out)
+        .unwrap();
+        out
+    }
+
+    fn parse(proto: &ProtocolImpl, data: Vec<u8>) -> Vec<ParseResult> {
+        let stream = proto.parse_response(Packet { addr: addr(), data });
+        futures::executor::block_on(stream.collect::<Vec<_>>())
+            .into_iter()
+            .map(|r| r.expect("expected a successful parse result"))
+            .collect()
+    }
+
+    #[test]
+    fn make_request_builds_getstatus_with_challenge() {
+        let bytes = ProtocolImpl::default().make_request(None);
+        let (_, pkt) = q3a::Packet::from_bytes(&bytes).unwrap();
+        match pkt {
+            q3a::Packet::GetStatus(data) => assert_eq!(data.challenge.trim(), "RGS"),
+            other => panic!("expected GetStatus, got {:?}", other.get_type()),
+        }
+    }
+
+    #[test]
+    fn parse_response_maps_rules_and_players() {
+        let data = status_response_bytes(
+            &[
+                ("sv_hostname", "My Server"),
+                ("mapname", "q3dm6"),
+                ("sv_maxclients", "16"),
+                ("g_gametype", "0"),
+                ("game", "osp"),
+                ("g_needpass", "1"),
+                ("sv_punkbuster", "1"),
+                ("custom_rule", "42"),
+            ],
+            vec![q3a::Player {
+                score: 10,
+                ping: 25,
+                name: "alice".to_string(),
+            }],
+        );
+
+        let results = parse(&ProtocolImpl::default(), data);
+        assert_eq!(results.len(), 1);
+        let server = match &results[0] {
+            ParseResult::Output(s) => s,
+            other => panic!("expected Output, got {other:?}"),
+        };
+
+        assert_eq!(server.name.as_deref(), Some("My Server"));
+        assert_eq!(server.map.as_deref(), Some("q3dm6"));
+        assert_eq!(server.max_clients, Some(16));
+        assert_eq!(server.game_type.as_deref(), Some("0"));
+        assert_eq!(server.mod_name.as_deref(), Some("osp"));
+        assert_eq!(server.need_pass, Some(true));
+        assert_eq!(server.secure, Some(true));
+        assert_eq!(server.num_clients, Some(1));
+
+        let players = server.players.as_ref().unwrap();
+        assert_eq!(players.len(), 1);
+        assert_eq!(players[0].name, "alice");
+        assert_eq!(players[0].ping, Some(25));
+        assert_eq!(players[0].info.get("score").unwrap(), &Value::from(10));
+
+        // Consumed keys are removed; only unrecognised rules remain.
+        assert_eq!(
+            server.rules.get("custom_rule"),
+            Some(&Value::String("42".to_string()))
+        );
+        assert!(!server.rules.contains_key("sv_hostname"));
+        assert!(!server.rules.contains_key("mapname"));
+    }
+
+    #[test]
+    fn parse_response_rejects_wrong_packet_type() {
+        // A GetStatus packet is not a valid *response*.
+        let data = ProtocolImpl::default().make_request(None);
+        let stream = ProtocolImpl::default().parse_response(Packet { addr: addr(), data });
+        let results = futures::executor::block_on(stream.collect::<Vec<_>>());
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+    }
+
+    #[test]
+    fn server_filter_can_drop_servers() {
+        let proto = ProtocolImpl {
+            server_filter: ServerFilter::from(Arc::new(|_| None) as ServerFilterFunc),
+            ..Default::default()
+        };
+
+        let data = status_response_bytes(&[("sv_hostname", "Filtered")], vec![]);
+        assert!(parse(&proto, data).is_empty());
+    }
+}

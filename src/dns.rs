@@ -122,3 +122,97 @@ impl Stream for ResolverPipe {
         Poll::Pending
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocols::q3s;
+    use futures::{SinkExt, StreamExt, future::ready};
+    use std::time::Duration;
+
+    /// Resolver backed by a static hostname -> address table.
+    struct MockResolver {
+        table: HashMap<String, SocketAddr>,
+    }
+
+    impl Resolver for MockResolver {
+        fn resolve(&self, host: Host) -> BoxFuture<'static, anyhow::Result<SocketAddr>> {
+            let result = match host {
+                Host::A(addr) => Ok(addr),
+                Host::S(s) => self
+                    .table
+                    .get(&s.host)
+                    .copied()
+                    .ok_or_else(|| format_err!("unknown host {}", s.host)),
+            };
+            Box::pin(ready(result))
+        }
+    }
+
+    fn pipe(table: &[(&str, &str)]) -> (ResolverPipe, History) {
+        let resolver = Arc::new(MockResolver {
+            table: table
+                .iter()
+                .map(|(h, a)| (h.to_string(), a.parse().unwrap()))
+                .collect(),
+        });
+        let history = History::default();
+        (ResolverPipe::new(resolver, history.clone()), history)
+    }
+
+    fn query(host: Host) -> Query {
+        Query {
+            protocol: TProtocol::from(q3s::ProtocolImpl::default()),
+            host,
+            state: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn resolves_named_host_and_records_history() {
+        let (mut pipe, history) = pipe(&[("example.com", "1.2.3.4:27960")]);
+
+        pipe.send(query(Host::from(("example.com", 27960))))
+            .await
+            .unwrap();
+
+        let resolved = pipe.next().await.expect("expected a resolved query");
+        assert_eq!(resolved.addr, "1.2.3.4:27960".parse().unwrap());
+
+        // The hostname behind the address is recorded for later reverse lookup.
+        assert_eq!(
+            history
+                .lock()
+                .unwrap()
+                .get(&resolved.addr)
+                .map(String::as_str),
+            Some("example.com")
+        );
+    }
+
+    #[tokio::test]
+    async fn passes_through_literal_address() {
+        let (mut pipe, history) = pipe(&[]);
+        let addr: SocketAddr = "9.9.9.9:27960".parse().unwrap();
+
+        pipe.send(query(Host::A(addr))).await.unwrap();
+
+        let resolved = pipe.next().await.expect("expected a resolved query");
+        assert_eq!(resolved.addr, addr);
+        // Literal addresses carry no hostname, so nothing is recorded.
+        assert!(history.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn drops_unspecified_addresses() {
+        let (mut pipe, _history) = pipe(&[]);
+
+        pipe.send(query(Host::A("0.0.0.0:27960".parse().unwrap())))
+            .await
+            .unwrap();
+
+        // Unspecified addresses are filtered out, so nothing is ever yielded.
+        let result = tokio::time::timeout(Duration::from_millis(100), pipe.next()).await;
+        assert!(result.is_err(), "expected no resolved query for 0.0.0.0");
+    }
+}
