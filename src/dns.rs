@@ -1,9 +1,9 @@
 use crate::{errors::Error, models::*};
 use anyhow::format_err;
 use futures::{
-    future::{ok, BoxFuture},
-    stream::FuturesUnordered,
     Sink, Stream,
+    future::{BoxFuture, ok},
+    stream::FuturesUnordered,
 };
 use serde_json::Value;
 use std::{
@@ -20,7 +20,7 @@ pub trait Resolver: Send + Sync + 'static {
     fn resolve(&self, host: Host) -> BoxFuture<'static, anyhow::Result<SocketAddr>>;
 }
 
-impl Resolver for trust_dns_resolver::TokioAsyncResolver {
+impl Resolver for hickory_resolver::TokioResolver {
     fn resolve(&self, host: Host) -> BoxFuture<'static, anyhow::Result<SocketAddr>> {
         let s = self.clone();
         match host {
@@ -29,7 +29,7 @@ impl Resolver for trust_dns_resolver::TokioAsyncResolver {
                 let addrs = s.lookup_ip(&stringaddr.host).await?;
 
                 addrs
-                    .into_iter()
+                    .iter()
                     .next()
                     .map(|ipaddr| SocketAddr::new(ipaddr, stringaddr.port))
                     .ok_or_else(|| {

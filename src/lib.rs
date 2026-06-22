@@ -13,7 +13,7 @@ pub mod protocols;
 use crate::{dns::Resolver, models::*, ping::Pinger};
 use bytes::Bytes;
 use futures::{
-    future::{ok, BoxFuture},
+    future::{BoxFuture, ok},
     prelude::*,
     stream::{BoxStream, FuturesUnordered},
 };
@@ -37,10 +37,10 @@ type ProtocolMapping = Arc<Mutex<HashMap<SocketAddr, TProtocol>>>;
 fn to_v4(addr: SocketAddr) -> SocketAddr {
     use self::SocketAddr::*;
 
-    if let V6(v) = addr {
-        if let Some(v4_addr) = v.ip().to_ipv4() {
-            return SocketAddr::from((v4_addr, v.port()));
-        }
+    if let V6(v) = addr
+        && let Some(v4_addr) = v.ip().to_ipv4()
+    {
+        return SocketAddr::from((v4_addr, v.port()));
     }
 
     addr
@@ -308,59 +308,59 @@ impl Stream for UdpQuery {
         let _ = Pin::new(&mut self.dns_to_socket).poll(cx)?;
         let _ = Pin::new(&mut self.socket_to_parser).poll(cx)?;
 
-        if self.pinger_stream.len() < 20 {
-            if let Poll::Ready(v) = self.parser_stream.as_mut().poll_next(cx) {
-                match v {
-                    Some(data) => match data {
-                        FullParseResult::FollowUp(s) => {
-                            self.follow_up_sink.send(s).unwrap();
-                        }
-                        FullParseResult::Output(mut srv) => {
-                            let addr = srv.data.addr;
-                            self.pinger_stream.push(
-                                if let Some(cached_ping) =
-                                    self.pinger_cache.lock().unwrap().get(&addr.ip())
-                                {
-                                    trace!("Found cached ping data for {}", addr);
-                                    srv.data.ping = Some(*cached_ping);
-                                    Box::pin(ok(srv))
-                                } else {
-                                    Box::pin(self.pinger.ping(addr.ip()).then({
-                                        let pinger_cache = self.pinger_cache.clone();
-                                        move |rtt| async move {
-                                            match rtt {
-                                                Ok(v) => {
-                                                    if let Some(v) = v {
-                                                        pinger_cache
-                                                            .lock()
-                                                            .unwrap()
-                                                            .insert(addr.ip(), v);
+        if self.pinger_stream.len() < 20
+            && let Poll::Ready(v) = self.parser_stream.as_mut().poll_next(cx)
+        {
+            match v {
+                Some(data) => match data {
+                    FullParseResult::FollowUp(s) => {
+                        self.follow_up_sink.send(s).unwrap();
+                    }
+                    FullParseResult::Output(mut srv) => {
+                        let addr = srv.data.addr;
+                        self.pinger_stream.push(
+                            if let Some(cached_ping) =
+                                self.pinger_cache.lock().unwrap().get(&addr.ip())
+                            {
+                                trace!("Found cached ping data for {}", addr);
+                                srv.data.ping = Some(*cached_ping);
+                                Box::pin(ok(srv))
+                            } else {
+                                Box::pin(self.pinger.ping(addr.ip()).then({
+                                    let pinger_cache = self.pinger_cache.clone();
+                                    move |rtt| async move {
+                                        match rtt {
+                                            Ok(v) => {
+                                                if let Some(v) = v {
+                                                    pinger_cache
+                                                        .lock()
+                                                        .unwrap()
+                                                        .insert(addr.ip(), v);
 
-                                                        srv.data.ping = Some(v);
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    debug!("Failed to ping {}: {}", addr, e);
+                                                    srv.data.ping = Some(v);
                                                 }
                                             }
-                                            Ok(srv)
+                                            Err(e) => {
+                                                debug!("Failed to ping {}: {}", addr, e);
+                                            }
                                         }
-                                    }))
-                                },
-                            );
-                        }
-                        FullParseResult::Error(e) => {
-                            debug!(
-                                "Parser returned error. Addr: {:?}, Data: {:?}, Error: {:?}",
-                                e.0.as_ref().map(|e| e.addr),
-                                e.0.map(|e| hex::encode(e.data)),
-                                e.1
-                            );
-                        }
-                    },
-                    None => {
-                        return Poll::Pending;
+                                        Ok(srv)
+                                    }
+                                }))
+                            },
+                        );
                     }
+                    FullParseResult::Error(e) => {
+                        debug!(
+                            "Parser returned error. Addr: {:?}, Data: {:?}, Error: {:?}",
+                            e.0.as_ref().map(|e| e.addr),
+                            e.0.map(|e| hex::encode(e.data)),
+                            e.1
+                        );
+                    }
+                },
+                None => {
+                    return Poll::Pending;
                 }
             }
         }
@@ -380,7 +380,10 @@ impl Default for UdpQueryBuilder {
         Self {
             pinger: Arc::new(()),
             dns_resolver: Arc::new(
-                trust_dns_resolver::TokioAsyncResolver::tokio_from_system_conf().unwrap(),
+                hickory_resolver::TokioResolver::builder_tokio()
+                    .unwrap()
+                    .build()
+                    .unwrap(),
             ) as Arc<dyn Resolver>,
         }
     }

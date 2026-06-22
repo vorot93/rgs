@@ -2,8 +2,8 @@ use derive_more::From;
 use futures::stream::BoxStream;
 use iso_country::Country as CountryBase;
 use serde::{
-    de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
 };
 use serde_json::Value;
 use std::{
@@ -91,10 +91,10 @@ pub struct UserQuery {
     pub host: Host,
 }
 
-#[allow(clippy::vtable_address_comparisons)]
 impl PartialEq for UserQuery {
     fn eq(&self, other: &Self) -> bool {
-        self.host == other.host && Arc::ptr_eq(&self.protocol, &other.protocol)
+        self.host == other.host
+            && std::ptr::addr_eq(Arc::as_ptr(&self.protocol), Arc::as_ptr(&other.protocol))
     }
 }
 
@@ -186,10 +186,9 @@ impl Deref for TProtocol {
     }
 }
 
-#[allow(clippy::vtable_address_comparisons)]
 impl PartialEq for TProtocol {
     fn eq(&self, other: &TProtocol) -> bool {
-        Arc::ptr_eq(self, other)
+        std::ptr::addr_eq(Arc::as_ptr(self), Arc::as_ptr(other))
     }
 }
 

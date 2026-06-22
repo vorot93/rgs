@@ -1,7 +1,7 @@
 use rgs::models::*;
 use tokio_stream::StreamExt;
 use tracing::*;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 #[tokio::main]
 async fn main() {
