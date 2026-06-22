@@ -13,7 +13,7 @@ use futures::Stream;
 use hickory_resolver::TokioResolver;
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
@@ -84,20 +84,26 @@ impl Client {
         }
     }
 
-    /// Query a master server over one UDP socket, optionally following up each
-    /// listed server with a `getstatus`. Yields each server as its response
-    /// arrives.
+    /// Query several Quake 3 master servers over one shared UDP socket, optionally
+    /// following up each listed server with a `getstatus`. Yields each server as
+    /// its response arrives, merged across all masters.
     ///
-    /// With `follow_up == false`, yields a bare `Server::new(addr)` per listed
-    /// address (no `getstatus` sent). With `follow_up == true`, yields fully
-    /// parsed servers. A per-server parse error is yielded as an `Err` item; the
-    /// run continues.
-    pub fn query_master(
+    /// The masters are contacted on one socket and a single receiver task
+    /// demultiplexes replies by source address. With `follow_up == false`, yields
+    /// a bare `Server::new(addr)` per listed address (no `getstatus` sent). With
+    /// `follow_up == true`, yields fully parsed servers with `Server::ping` set.
+    ///
+    /// Errors are surfaced as `Err` items without ending the run: a master that
+    /// fails to resolve or send, a master whose response is unparseable, and a
+    /// per-server parse error each yield an `Err` while the rest of the run
+    /// continues. A socket bind failure is fatal and ends the stream.
+    pub fn query_masters(
         &self,
         socket: Option<UdpSocket>,
-        host: Host,
+        masters: impl IntoIterator<Item = Host>,
         follow_up: bool,
     ) -> impl Stream<Item = anyhow::Result<Server>> + 'static {
+        let masters: Vec<Host> = masters.into_iter().collect();
         let resolver = self.resolver.clone();
         let timeout = self.timeout;
         let version = self.version;
@@ -105,13 +111,6 @@ impl Client {
         let server_filter = self.server_filter.clone();
 
         async_stream::stream! {
-            let master_addr = match dns::resolve(&resolver, host).await {
-                Ok(a) => a,
-                Err(e) => {
-                    yield Err(e);
-                    return;
-                }
-            };
             let socket = match bind_or(socket).await {
                 Ok(s) => s,
                 Err(e) => {
@@ -122,10 +121,9 @@ impl Client {
             let socket = Arc::new(socket);
 
             // Dedicated receiver: stamp each datagram the instant it arrives and
-            // forward it. Measuring RTT from this arrival time (rather than from
-            // when the main loop next polls the socket) keeps the ping free of
-            // parse, fan-out, and consumer-pacing delay. The channel is unbounded
-            // so receiving never blocks on a slow consumer.
+            // forward it, so RTT excludes parse, fan-out, and consumer-pacing
+            // delay. The channel is unbounded so receiving never blocks on a slow
+            // consumer.
             let (tx, mut rx) =
                 tokio::sync::mpsc::unbounded_channel::<(Vec<u8>, SocketAddr, Instant)>();
             let receiver = {
@@ -140,10 +138,6 @@ impl Client {
                                     break; // the stream was dropped
                                 }
                             }
-                            // An unconnected socket rarely surfaces ICMP errors;
-                            // a recv error ends reception (mirrors the old loop's
-                            // break), and the main loop stops when the channel
-                            // closes.
                             Err(e) => {
                                 debug!("recv error: {e}");
                                 break;
@@ -155,54 +149,81 @@ impl Client {
             // Abort the receiver when the stream ends or is dropped.
             let _receiver = AbortOnDrop(receiver);
 
+            // Contact each master. A master enters `masters_state` only on a
+            // successful resolve + send; a failure yields an Err and is skipped.
+            // Masters are deduped by resolved address so `getservers` is never
+            // sent to the same master twice.
             let request = q3::make_getservers(version);
-            if let Err(e) = socket.send_to(&request, master_addr).await {
-                yield Err(e.into());
-                return;
+            let mut masters_state: HashMap<SocketAddr, MasterQueryState> = HashMap::new();
+            for host in masters {
+                let addr = match dns::resolve(&resolver, host).await {
+                    Ok(a) => a,
+                    Err(e) => {
+                        yield Err(e);
+                        continue;
+                    }
+                };
+                if masters_state.contains_key(&addr) {
+                    continue;
+                }
+                if let Err(e) = socket.send_to(&request, addr).await {
+                    yield Err(e.into());
+                    continue;
+                }
+                masters_state.insert(addr, MasterQueryState::Active);
             }
 
             let mut pending: HashMap<SocketAddr, Instant> = HashMap::new();
-            let mut master_done = false;
+            // Every server address committed this run, across all masters and
+            // datagrams. Never emptied: it is the cross-master dedup set.
+            let mut seen: HashSet<SocketAddr> = HashSet::new();
 
             loop {
-                if master_done && pending.is_empty() {
+                let all_masters_done = masters_state
+                    .values()
+                    .all(|s| matches!(s, MasterQueryState::Done));
+                if all_masters_done && pending.is_empty() {
                     break;
                 }
 
                 let (data, src, recv_at) = match tokio::time::timeout(timeout, rx.recv()).await {
                     Ok(Some(item)) => item,
-                    // Channel closed (the receiver hit a socket error and stopped)
-                    // or the idle gap exceeded the timeout: stop reading.
+                    // Channel closed (the receiver hit a socket error) or the idle
+                    // gap exceeded the timeout: stop reading.
                     Ok(None) | Err(_) => break,
                 };
 
-                if src == master_addr && !master_done {
+                if let Some(state) = masters_state.get_mut(&src) {
                     match q3::parse_getservers_response(&data) {
                         Ok((addrs, eot)) => {
                             if eot {
-                                master_done = true;
+                                *state = MasterQueryState::Done;
                             }
                             for v4 in addrs {
                                 let sa = SocketAddr::V4(v4);
+                                // Dedup across all masters and datagrams: each
+                                // unique address is committed at most once.
+                                if seen.contains(&sa) {
+                                    continue;
+                                }
                                 if follow_up {
-                                    if pending.contains_key(&sa) {
-                                        continue;
-                                    }
                                     let getstatus = q3::make_getstatus();
                                     if let Err(e) = socket.send_to(&getstatus, sa).await {
                                         debug!("failed to send getstatus to {sa}: {e}");
-                                        continue;
+                                        continue; // not marked seen; a later master may retry
                                     }
+                                    seen.insert(sa);
                                     pending.insert(sa, Instant::now());
                                 } else {
+                                    seen.insert(sa);
                                     yield Ok(Server::new(sa));
                                 }
                             }
                         }
                         Err(e) => {
-                            // The master's response is unparseable: give up on it
-                            // but keep draining queried servers.
-                            master_done = true;
+                            // This master's response is unparseable: mark it done
+                            // but keep draining the other masters and servers.
+                            *state = MasterQueryState::Done;
                             yield Err(e);
                         }
                     }
@@ -223,6 +244,14 @@ impl Client {
             }
         }
     }
+}
+
+/// Tracks whether a master has finished sending its server list.
+enum MasterQueryState {
+    /// `getservers` sent; awaiting responses / the `eot` datagram.
+    Active,
+    /// `eot` received, or the master's response was unparseable.
+    Done,
 }
 
 /// Aborts a spawned task when dropped, so the master receiver task never

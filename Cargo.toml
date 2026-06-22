@@ -1,6 +1,6 @@
 [package]
 name = "qgs"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 authors = ["Artem Vorotnikov <artem@vorotnikov.me>"]
 description = "Tool for querying Quake game servers"

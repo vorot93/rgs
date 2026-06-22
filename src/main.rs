@@ -12,8 +12,10 @@ async fn main() {
         .init();
 
     let client = Client::builder().build();
-    let host = Host::from(("master.ioquake3.org", 27950));
-    let mut stream = std::pin::pin!(client.query_master(None, host, true));
+    let masters = vec![Host::from(("master.ioquake3.org", 27950))];
+    // More masters can be added to the list; an unreachable one surfaces as an
+    // Err item and the run continues.
+    let mut stream = std::pin::pin!(client.query_masters(None, masters, true));
 
     let mut total_queried = 0u64;
     while let Some(res) = stream.next().await {

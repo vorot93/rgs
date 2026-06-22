@@ -116,7 +116,7 @@ async fn master_fans_out_to_per_server_queries() {
     let entries = tokio::time::timeout(
         Duration::from_secs(10),
         client
-            .query_master(None, Host::Addr(master_addr), true)
+            .query_masters(None, [Host::Addr(master_addr)], true)
             .collect::<Vec<_>>(),
     )
     .await
@@ -155,7 +155,7 @@ async fn master_response_split_across_datagrams_is_fully_read() {
     let entries = tokio::time::timeout(
         Duration::from_secs(10),
         client
-            .query_master(None, Host::Addr(master_addr), true)
+            .query_masters(None, [Host::Addr(master_addr)], true)
             .collect::<Vec<_>>(),
     )
     .await
@@ -208,7 +208,7 @@ async fn master_without_follow_up_yields_bare_addresses() {
     let entries = tokio::time::timeout(
         Duration::from_secs(10),
         client
-            .query_master(None, Host::Addr(master_addr), false)
+            .query_masters(None, [Host::Addr(master_addr)], false)
             .collect::<Vec<_>>(),
     )
     .await
@@ -242,7 +242,7 @@ async fn master_follow_up_surfaces_per_server_parse_error_and_continues() {
     let entries = tokio::time::timeout(
         Duration::from_secs(10),
         client
-            .query_master(None, Host::Addr(master_addr), true)
+            .query_masters(None, [Host::Addr(master_addr)], true)
             .collect::<Vec<_>>(),
     )
     .await
@@ -272,7 +272,7 @@ async fn ping_is_not_inflated_by_a_slow_consumer() {
     let master_addr = spawn_echo_server(getservers_response(&[v4(a), v4(b)], true)).await;
 
     let client = Client::builder().build();
-    let mut stream = std::pin::pin!(client.query_master(None, Host::Addr(master_addr), true));
+    let mut stream = std::pin::pin!(client.query_masters(None, [Host::Addr(master_addr)], true));
 
     // Take the first result, then stall the consumer far longer than any real
     // loopback RTT before taking the second.
@@ -296,4 +296,111 @@ async fn ping_is_not_inflated_by_a_slow_consumer() {
             server.name,
         );
     }
+}
+
+#[tokio::test]
+async fn multiple_masters_fan_out_to_all_servers() {
+    let a = spawn_echo_server(status_response("Server A", "q3dm1")).await;
+    let b = spawn_echo_server(status_response("Server B", "q3dm2")).await;
+    let master1 = spawn_echo_server(getservers_response(&[v4(a)], true)).await;
+    let master2 = spawn_echo_server(getservers_response(&[v4(b)], true)).await;
+
+    let client = Client::builder().build();
+    let entries = tokio::time::timeout(
+        Duration::from_secs(10),
+        client
+            .query_masters(None, [Host::Addr(master1), Host::Addr(master2)], true)
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .expect("stream did not terminate");
+
+    let mut names: Vec<String> = entries
+        .into_iter()
+        .map(|r| r.unwrap().name.unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["Server A".to_string(), "Server B".to_string()]);
+}
+
+#[tokio::test]
+async fn list_only_dedups_servers_listed_by_multiple_masters() {
+    // Two masters whose lists overlap on `shared`. In list-only mode the shared
+    // address must be emitted exactly once across both masters.
+    let shared: SocketAddrV4 = "10.0.0.1:27960".parse().unwrap();
+    let only1: SocketAddrV4 = "10.0.0.2:27960".parse().unwrap();
+    let only2: SocketAddrV4 = "10.0.0.3:27960".parse().unwrap();
+    let master1 = spawn_echo_server(getservers_response(&[shared, only1], true)).await;
+    let master2 = spawn_echo_server(getservers_response(&[shared, only2], true)).await;
+
+    let client = Client::builder().build();
+    let entries = tokio::time::timeout(
+        Duration::from_secs(10),
+        client
+            .query_masters(None, [Host::Addr(master1), Host::Addr(master2)], false)
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .expect("stream did not terminate");
+
+    let mut addrs: Vec<SocketAddr> = entries.iter().map(|r| r.as_ref().unwrap().addr).collect();
+    addrs.sort();
+    assert_eq!(
+        addrs,
+        vec![
+            SocketAddr::V4(shared),
+            SocketAddr::V4(only1),
+            SocketAddr::V4(only2),
+        ],
+        "the shared address must appear exactly once"
+    );
+}
+
+#[tokio::test]
+async fn follow_up_queries_a_shared_server_only_once() {
+    // Both masters list the same live server; it must be queried and yielded
+    // exactly once.
+    let shared = spawn_echo_server(status_response("Shared", "q3dm6")).await;
+    let master1 = spawn_echo_server(getservers_response(&[v4(shared)], true)).await;
+    let master2 = spawn_echo_server(getservers_response(&[v4(shared)], true)).await;
+
+    let client = Client::builder().build();
+    let entries = tokio::time::timeout(
+        Duration::from_secs(10),
+        client
+            .query_masters(None, [Host::Addr(master1), Host::Addr(master2)], true)
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .expect("stream did not terminate");
+
+    let oks: Vec<_> = entries.iter().filter(|r| r.is_ok()).collect();
+    assert_eq!(oks.len(), 1, "a server listed by two masters must be queried once");
+    assert_eq!(oks[0].as_ref().unwrap().name.as_deref(), Some("Shared"));
+}
+
+#[tokio::test]
+async fn one_failing_master_does_not_abort_the_others() {
+    // A healthy master plus one whose host never resolves (the reserved
+    // `.invalid` TLD, RFC 2606). The unresolvable master must surface one Err
+    // while the healthy master's server still arrives.
+    let a = spawn_echo_server(status_response("Server A", "q3dm1")).await;
+    let healthy = spawn_echo_server(getservers_response(&[v4(a)], true)).await;
+    let dead = Host::from(("nonexistent.invalid", 27950));
+
+    let client = Client::builder().timeout(Duration::from_secs(2)).build();
+    let entries = tokio::time::timeout(
+        Duration::from_secs(10),
+        client
+            .query_masters(None, [dead, Host::Addr(healthy)], true)
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .expect("stream did not terminate");
+
+    let oks: Vec<_> = entries.iter().filter(|r| r.is_ok()).collect();
+    let errs: Vec<_> = entries.iter().filter(|r| r.is_err()).collect();
+    assert_eq!(oks.len(), 1, "the healthy master's server must still arrive");
+    assert_eq!(oks[0].as_ref().unwrap().name.as_deref(), Some("Server A"));
+    assert_eq!(errs.len(), 1, "the unresolvable master must surface one Err");
 }
