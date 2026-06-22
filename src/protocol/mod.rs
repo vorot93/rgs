@@ -35,6 +35,9 @@ pub fn make_default_protocols() -> HashMap<String, Arc<dyn Protocol>> {
     let q3s: Arc<dyn Protocol> = Arc::new(q3s::Q3s::default());
     let q3m: Arc<dyn Protocol> = Arc::new(q3m::Q3m {
         q3s_protocol: Some(q3s.clone()),
+        // Classic Quake 3 (protocol 68): its master list is far larger than
+        // ioquake3's protocol 71 and routinely spans several UDP datagrams.
+        version: 68,
         ..Default::default()
     });
 
