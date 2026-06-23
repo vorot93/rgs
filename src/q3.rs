@@ -24,12 +24,15 @@ pub enum Rule {
 
 impl From<q3a::Player> for Player {
     fn from(v: q3a::Player) -> Self {
+        let mut info = serde_json::Map::new();
+        info.insert("score".to_string(), Value::Number(v.score.into()));
+        if let Some(team) = v.team {
+            info.insert("team".to_string(), Value::Number(team.into()));
+        }
         Self {
             name: v.name,
             ping: Some(i64::from(v.ping)),
-            info: vec![("score".to_string(), Value::Number(v.score.into()))]
-                .into_iter()
-                .collect(),
+            info,
         }
     }
 }
@@ -296,6 +299,7 @@ mod tests {
                 score: 10,
                 ping: 25,
                 name: "alice".to_string(),
+                team: None,
             }],
         );
 
@@ -379,6 +383,28 @@ mod tests {
     fn parse_getservers_response_rejects_wrong_packet_type() {
         let data = make_getservers(68, None);
         assert!(parse_getservers_response(&data).is_err());
+    }
+
+    #[test]
+    fn player_team_maps_into_info() {
+        let p: Player = q3a::Player {
+            score: 5,
+            ping: 20,
+            name: "Cathy".to_string(),
+            team: Some(2),
+        }
+        .into();
+        assert_eq!(p.info.get("team"), Some(&Value::from(2)));
+        assert_eq!(p.info.get("score"), Some(&Value::from(5)));
+
+        let no_team: Player = q3a::Player {
+            score: 5,
+            ping: 20,
+            name: "Grunt".to_string(),
+            team: None,
+        }
+        .into();
+        assert!(no_team.info.get("team").is_none());
     }
 
     #[test]
